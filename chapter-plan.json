@@ -112,7 +112,7 @@
         "rust/crates/plugins/src/hooks.rs"
       ],
       "output_path": "chapter-08/hooks.md",
-      "status": "pending"
+      "status": "done"
     },
     {
       "number": 9,
