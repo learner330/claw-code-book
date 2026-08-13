@@ -47,7 +47,7 @@
         "rust/crates/runtime/src/lib.rs"
       ],
       "output_path": "chapter-03/architecture.md",
-      "status": "pending"
+      "status": "done"
     },
     {
       "number": 4,
