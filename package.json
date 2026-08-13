@@ -1,0 +1,14 @@
+{
+  "name": "my-book",
+  "version": "1.0.0",
+  "description": "一本用 VitePress 构建的多章节书籍",
+  "type": "module",
+  "scripts": {
+    "dev": "vitepress dev",
+    "build": "vitepress build",
+    "preview": "vitepress preview"
+  },
+  "devDependencies": {
+    "vitepress": "^1.6.3"
+  }
+}
