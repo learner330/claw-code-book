@@ -152,7 +152,7 @@
         "rust/crates/commands/src/"
       ],
       "output_path": "chapter-11/plugins.md",
-      "status": "pending"
+      "status": "done"
     },
     {
       "number": 12,
