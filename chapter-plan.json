@@ -125,7 +125,7 @@
         "rust/crates/runtime/src/session.rs"
       ],
       "output_path": "chapter-09/session.md",
-      "status": "pending"
+      "status": "done"
     },
     {
       "number": 10,
