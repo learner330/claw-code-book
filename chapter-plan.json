@@ -1,0 +1,224 @@
+{
+  "book_title": "Claw Code 代码讲解",
+  "source_code_path": "claw-code",
+  "reference_doc_id": "2754357808",
+  "writing_guide": "writing-guide.md",
+  "chapters": [
+    {
+      "number": 0,
+      "title": "导读",
+      "km_doc_id": "2755123767",
+      "source_files": [],
+      "output_path": "chapter-00/intro.md",
+      "status": "pending"
+    },
+    {
+      "number": 1,
+      "title": "什么是 Agent",
+      "km_doc_id": "2754327855",
+      "source_files": [
+        "src/runtime.py",
+        "src/query_engine.py",
+        "src/coordinator/__init__.py"
+      ],
+      "output_path": "chapter-01/what-is-agent.md",
+      "status": "pending"
+    },
+    {
+      "number": 2,
+      "title": "LLM 最小必要知识",
+      "km_doc_id": "2754328027",
+      "source_files": [
+        "src/models.py",
+        "rust/crates/api/src/"
+      ],
+      "output_path": "chapter-02/llm-basics.md",
+      "status": "pending"
+    },
+    {
+      "number": 3,
+      "title": "整体架构全景",
+      "km_doc_id": "2754827466",
+      "source_files": [
+        "src/main.py",
+        "src/runtime.py",
+        "src/system_init.py",
+        "src/bootstrap_graph.py",
+        "rust/crates/runtime/src/lib.rs"
+      ],
+      "output_path": "chapter-03/architecture.md",
+      "status": "pending"
+    },
+    {
+      "number": 4,
+      "title": "启动流程深度解析",
+      "km_doc_id": "2754537617",
+      "source_files": [
+        "src/main.py",
+        "src/bootstrap/__init__.py",
+        "src/bootstrap_graph.py",
+        "src/system_init.py",
+        "rust/crates/runtime/src/config.rs",
+        "rust/crates/rusty-claude-cli/src/main.rs"
+      ],
+      "output_path": "chapter-04/startup.md",
+      "status": "pending"
+    },
+    {
+      "number": 5,
+      "title": "工具系统",
+      "km_doc_id": "2754797138",
+      "source_files": [
+        "src/Tool.py",
+        "src/tools.py",
+        "src/tool_pool.py",
+        "rust/crates/tools/src/lib.rs"
+      ],
+      "output_path": "chapter-05/tools.md",
+      "status": "pending"
+    },
+    {
+      "number": 6,
+      "title": "查询引擎与 Turn Loop",
+      "km_doc_id": "2754297997",
+      "source_files": [
+        "src/query_engine.py",
+        "src/query.py",
+        "src/QueryEngine.py",
+        "rust/crates/runtime/src/conversation.rs"
+      ],
+      "output_path": "chapter-06/turn-loop.md",
+      "status": "pending"
+    },
+    {
+      "number": 7,
+      "title": "权限系统",
+      "km_doc_id": "2754337746",
+      "source_files": [
+        "src/permissions.py",
+        "src/path_scope.py",
+        "rust/crates/runtime/src/policy_engine.rs",
+        "rust/crates/runtime/src/trust_resolver.rs"
+      ],
+      "output_path": "chapter-07/permissions.md",
+      "status": "pending"
+    },
+    {
+      "number": 8,
+      "title": "钩子系统",
+      "km_doc_id": "2754857217",
+      "source_files": [
+        "src/hooks/",
+        "rust/crates/plugins/src/hooks.rs"
+      ],
+      "output_path": "chapter-08/hooks.md",
+      "status": "pending"
+    },
+    {
+      "number": 9,
+      "title": "状态机与会话管理",
+      "km_doc_id": "2754397994",
+      "source_files": [
+        "src/state/",
+        "src/session_store.py",
+        "src/history.py",
+        "rust/crates/runtime/src/session.rs"
+      ],
+      "output_path": "chapter-09/session.md",
+      "status": "pending"
+    },
+    {
+      "number": 10,
+      "title": "协调器：多 Agent 编排",
+      "km_doc_id": "2754258146",
+      "source_files": [
+        "src/coordinator/__init__.py",
+        "src/task.py",
+        "src/tasks.py",
+        "src/execution_registry.py"
+      ],
+      "output_path": "chapter-10/coordinator.md",
+      "status": "pending"
+    },
+    {
+      "number": 11,
+      "title": "插件系统与命令扩展",
+      "km_doc_id": "2754737259",
+      "source_files": [
+        "src/plugins/__init__.py",
+        "src/commands.py",
+        "src/command_graph.py",
+        "rust/crates/plugins/src/lib.rs",
+        "rust/crates/commands/src/"
+      ],
+      "output_path": "chapter-11/plugins.md",
+      "status": "pending"
+    },
+    {
+      "number": 12,
+      "title": "Rust 重构版深度解读",
+      "km_doc_id": "2754947156",
+      "source_files": [
+        "rust/crates/runtime/src/",
+        "rust/crates/rusty-claude-cli/src/",
+        "rust/crates/api/src/"
+      ],
+      "output_path": "chapter-12/rust-rewrite.md",
+      "status": "pending"
+    },
+    {
+      "number": 13,
+      "title": "TypeScript 原版 vs Python/Rust 重写版对比",
+      "km_doc_id": "2754757683",
+      "source_files": [
+        "src/native_ts/",
+        "rust/crates/compat-harness/src/lib.rs",
+        "src/parity_audit.py",
+        "src/port_manifest.py"
+      ],
+      "output_path": "chapter-13/comparison.md",
+      "status": "pending"
+    },
+    {
+      "number": 14,
+      "title": "从 Java 工程师到 Agent 工程师的思维转型",
+      "km_doc_id": "2755056487",
+      "source_files": [],
+      "output_path": "chapter-14/mindset.md",
+      "status": "pending"
+    },
+    {
+      "number": 15,
+      "title": "配置层：Rules、Commands、MCP 与 Skills",
+      "km_doc_id": "2755153722",
+      "source_files": [
+        "src/skills/",
+        "src/cli/__init__.py",
+        "rust/crates/runtime/src/config.rs",
+        "rust/crates/runtime/src/mcp_stdio.rs"
+      ],
+      "output_path": "chapter-15/config-layer.md",
+      "status": "pending"
+    },
+    {
+      "number": 16,
+      "title": "AI-Native 工程工作流",
+      "km_doc_id": "2755143810",
+      "source_files": [],
+      "output_path": "chapter-16/workflow.md",
+      "status": "pending"
+    },
+    {
+      "number": 17,
+      "title": "实战：研发全流程 Multi-Agent",
+      "km_doc_id": "2754607508",
+      "source_files": [
+        "src/coordinator/__init__.py",
+        "src/task.py",
+        "src/remote_runtime.py"
+      ],
+      "output_path": "chapter-17/practice.md",
+      "status": "pending"
+    }
+  ]
+}

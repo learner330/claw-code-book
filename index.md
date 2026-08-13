@@ -1,26 +1,23 @@
 ---
-# 首页配置
 layout: home
 
 hero:
   name: "Claw Code 代码讲解"
-  text: "深入理解 Claw Code 的设计与实现"
-  tagline: 从源码到架构，逐章拆解 Claw Code 的核心原理
+  text: "从 Java 后端到 Agent 工程师"
+  tagline: 逐模块拆解 claw-code 源码，用 Java 工程师熟悉的概念理解 Agent 架构
   actions:
     - theme: brand
       text: 开始阅读
-      link: /chapter-01/intro
+      link: /chapter-00/intro
     - theme: alt
       text: GitHub 仓库
       link: https://github.com/learner330/claw-code-book
 
 features:
-  - title: 完全免费
-    details: 基于 GitHub Pages 托管，零成本发布你的作品
-  - title: Markdown 写作
-    details: 专注内容，用 Markdown 编写，自动生成美观页面
-  - title: 全文搜索
-    details: 内置本地搜索，读者可以快速定位内容
-  - title: 暗色模式
-    details: 自动适配系统主题，护眼阅读
+  - title: 源码驱动
+    details: 每一段分析都来自 claw-code 实际源码，标注文件路径，可对照阅读
+  - title: Java 视角
+    details: 用 Spring Boot、MyBatis 等熟悉概念类比 Agent 架构，降低理解门槛
+  - title: 无 AI 味
+    details: 摒弃反问句、感叹式过渡和装饰性图片，专注技术本身
 ---
