@@ -101,7 +101,7 @@
         "rust/crates/runtime/src/trust_resolver.rs"
       ],
       "output_path": "chapter-07/permissions.md",
-      "status": "pending"
+      "status": "done"
     },
     {
       "number": 8,
