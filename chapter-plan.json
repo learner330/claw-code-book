@@ -10,7 +10,7 @@
       "km_doc_id": "2755123767",
       "source_files": [],
       "output_path": "chapter-00/intro.md",
-      "status": "pending"
+      "status": "done"
     },
     {
       "number": 1,
@@ -62,7 +62,7 @@
         "rust/crates/rusty-claude-cli/src/main.rs"
       ],
       "output_path": "chapter-04/startup.md",
-      "status": "pending"
+      "status": "done"
     },
     {
       "number": 5,
