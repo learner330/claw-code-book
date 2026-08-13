@@ -75,7 +75,7 @@
         "rust/crates/tools/src/lib.rs"
       ],
       "output_path": "chapter-05/tools.md",
-      "status": "pending"
+      "status": "done"
     },
     {
       "number": 6,
