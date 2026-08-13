@@ -33,7 +33,7 @@
         "rust/crates/api/src/"
       ],
       "output_path": "chapter-02/llm-basics.md",
-      "status": "pending"
+      "status": "done"
     },
     {
       "number": 3,
