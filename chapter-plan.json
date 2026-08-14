@@ -185,7 +185,7 @@
       "km_doc_id": "2755056487",
       "source_files": [],
       "output_path": "chapter-14/mindset.md",
-      "status": "pending"
+      "status": "done"
     },
     {
       "number": 15,
@@ -198,7 +198,7 @@
         "rust/crates/runtime/src/mcp_stdio.rs"
       ],
       "output_path": "chapter-15/config-layer.md",
-      "status": "pending"
+      "status": "done"
     },
     {
       "number": 16,
@@ -206,7 +206,7 @@
       "km_doc_id": "2755143810",
       "source_files": [],
       "output_path": "chapter-16/workflow.md",
-      "status": "pending"
+      "status": "done"
     },
     {
       "number": 17,
@@ -218,7 +218,7 @@
         "src/remote_runtime.py"
       ],
       "output_path": "chapter-17/practice.md",
-      "status": "pending"
+      "status": "done"
     }
   ]
 }
