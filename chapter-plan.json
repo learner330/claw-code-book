@@ -164,7 +164,7 @@
         "rust/crates/api/src/"
       ],
       "output_path": "chapter-12/rust-rewrite.md",
-      "status": "pending"
+      "status": "done"
     },
     {
       "number": 13,
