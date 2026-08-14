@@ -1,23 +1,19 @@
-# 第7章 权限系统：Agent 的安全边界
+# 第8章 权限系统：Agent 的安全边界
 
 ## 本章概览
 
-本章分析 claw-code 的权限系统——如何在每次工具调用前确认操作是否在用户授权范围内。对应第2章架构全景中的 `runtime::permissions` 和 `runtime::permission_enforcer` 模块，以及 Python 端的 `permissions.py` 和 `path_scope.py`。
+本章分析 claw-code 的权限系统——如何在每次工具调用前确认操作是否在用户授权范围内。对应第2章架构全景中的 `runtime::permissions` 和 `runtime::permission_enforcer` 模块，以及 `trust_resolver.rs` 和 `policy_engine.rs`。
 
 Agent 能执行 shell 命令和文件读写，天然具有破坏系统的能力。权限系统要解决的核心问题是：每次工具调用前，根据当前权限模式、工具的权限要求、用户配置的规则、钩子的覆盖决策，判断这次操作是允许、拒绝还是需要用户确认。
 
-本章按数据流顺序展开：先看权限模式的五级模型和 Python 端的黑名单机制（7.1），再看 Rust 端 `PermissionPolicy` 的规则引擎和授权评估流程（7.2），然后看 `PermissionEnforcer` 的执行层实现（7.3），包括路径边界检查和 bash 命令分类。
-
 | 关键文件 | 职责 |
 | --- | --- |
-| `src/permissions.py` | Python 端工具黑名单与路径作用域委托 |
-| `src/path_scope.py` | Python 端路径提取与工作区边界验证 |
-| `rust/crates/runtime/src/permissions.rs` | Rust 端五级权限模型，规则引擎，授权评估 |
-| `rust/crates/runtime/src/permission_enforcer.rs` | Rust 端执行层，路径规范化，命令分类 |
+| `rust/crates/runtime/src/permissions.rs` | 五级权限模型，规则引擎，授权评估 |
+| `rust/crates/runtime/src/permission_enforcer.rs` | 执行层，路径边界检查，命令分类 |
+| `rust/crates/runtime/src/trust_resolver.rs` | 工作区信任决策，白名单，手动审批 |
+| `rust/crates/runtime/src/policy_engine.rs` | Lane 工作流策略引擎，条件-动作规则 |
 
-## 7.1 权限模式与 Python 端黑名单
-
-### PermissionMode：五级偏序模型
+## 8.1 权限模式：五级偏序模型
 
 Rust 端将权限抽象为五个层级，形成偏序关系：
 
@@ -69,86 +65,7 @@ impl PermissionMode {
 
 `match self` 是穷尽的——编译器保证所有变体都被处理。`Self::ReadOnly` 是 `PermissionMode::ReadOnly` 的简写，在 `impl` 块内可以用 `Self` 代替类型名。
 
-### Python 端 ToolPermissionContext
-
-Python 端的权限模型相对精简，集中在 `ToolPermissionContext`：
-
-```python
-# claw-code/src/permissions.py
-
-@dataclass(frozen=True)
-class ToolPermissionContext:
-    deny_names: frozenset[str] = field(default_factory=frozenset)
-    deny_prefixes: tuple[str, ...] = ()
-    workspace_scope: WorkspacePathScope | None = None
-    cwd: Path | None = None
-```
-
-四个字段构成两层防御。`deny_names` 和 `deny_prefixes` 是工具名黑名单——`deny_names` 做精确匹配（`frozenset`，O(1) 查找），`deny_prefixes` 做前缀匹配（如 `"bash"` 拦截所有以 `bash` 开头的工具名）。`workspace_scope` 和 `cwd` 用于路径作用域验证——确保工具操作的路径在工作区内。
-
-```python
-# claw-code/src/permissions.py
-
-    @classmethod
-    def from_iterables(
-        cls,
-        deny_names: list[str] | None = None,
-        deny_prefixes: list[str] | None = None,
-        workspace_root: str | Path | None = None,
-        workspace_roots: list[str | Path] | tuple[str | Path, ...] | None = None,
-        cwd: str | Path | None = None,
-    ) -> 'ToolPermissionContext':
-        roots: list[str | Path] = []
-        if workspace_roots:
-            roots.extend(workspace_roots)
-        if workspace_root is not None:
-            roots.append(workspace_root)
-        return cls(
-            deny_names=frozenset(name.lower() for name in (deny_names or [])),
-            deny_prefixes=tuple(prefix.lower() for prefix in (deny_prefixes or [])),
-            workspace_scope=WorkspacePathScope.from_roots(roots) if roots else None,
-            cwd=Path(cwd).expanduser().resolve(strict=False) if cwd is not None else None,
-        )
-```
-
-所有工具名和前缀都转为小写——与 Rust 端的工具名规范化一致，确保大小写不影响匹配。`workspace_root` 和 `workspace_roots` 合并为一个列表，然后创建 `WorkspacePathScope`。`expanduser().resolve(strict=False)` 展开 `~` 并解析为绝对路径，`strict=False` 允许路径不存在。
-
-`blocks` 方法做黑名单检查：
-
-```python
-# claw-code/src/permissions.py
-
-    def blocks(self, tool_name: str) -> bool:
-        lowered = tool_name.lower()
-        return lowered in self.deny_names or any(lowered.startswith(prefix) for prefix in self.deny_prefixes)
-```
-
-`lowered in self.deny_names` 做精确匹配（`frozenset` 的 `in` 是 O(1)）。`any(lowered.startswith(prefix) for prefix in self.deny_prefixes)` 做前缀匹配——`any` 在第一个 `True` 时短路。如果任一匹配，返回 `True` 表示工具被拦截。
-
-`validate_payload_scope` 做路径作用域验证：
-
-```python
-# claw-code/src/permissions.py
-
-    def validate_payload_scope(self, tool_name: str, payload: str) -> PathScopeDecision:
-        if self.workspace_scope is None or not _scope_checked_tool(tool_name):
-            return PathScopeDecision(True, 'workspace path scope not required for this tool')
-        return self.workspace_scope.validate_payload(payload, cwd=self.cwd)
-```
-
-`_scope_checked_tool` 判断工具是否需要路径检查——只有涉及文件系统操作的工具才检查：
-
-```python
-# claw-code/src/permissions.py
-
-def _scope_checked_tool(tool_name: str) -> bool:
-    lowered = tool_name.lower()
-    return any(marker in lowered for marker in ('bash', 'shell', 'powershell', 'fileread', 'filewrite', 'fileedit'))
-```
-
-如果工具名中包含 `bash`、`shell`、`powershell`、`fileread`、`filewrite`、`fileedit` 中的任何一个标记，就需要做路径检查。其他工具（如 `TodoWrite`、`Skill`、`Agent`）不涉及文件系统，不需要路径验证。这与 Rust 端的 `classify_*` 函数理念一致——只有文件系统工具才需要路径作用域验证。
-
-## 7.2 PermissionPolicy：规则引擎与授权评估
+## 8.2 PermissionPolicy：规则引擎与授权评估
 
 ### PermissionPolicy 结构
 
@@ -188,6 +105,8 @@ impl PermissionPolicy {
     }
 ```
 
+`with_tool_requirement` 注册单个工具的权限要求：
+
 ```rust
 // claw-code/rust/crates/runtime/src/permissions.rs
 
@@ -203,7 +122,7 @@ impl PermissionPolicy {
     }
 ```
 
-`impl Into<String>` 接受 `&str` 或 `String`——调用方不需要显式转换。`insert` 把工具名和权限级别存入 `BTreeMap`。返回 `self` 支持链式调用：`policy.with_tool_requirement("bash", DangerFullAccess).with_tool_requirement("read_file", ReadOnly)`。
+`impl Into<String>` 接受 `&str` 或 `String`——调用方不需要显式转换。`insert` 把工具名和权限级别存入 `BTreeMap`。返回 `self` 支持链式调用。
 
 `with_permission_rules` 从配置加载规则：
 
@@ -313,7 +232,7 @@ impl PermissionRule {
     }
 ```
 
-解析逻辑分两步。第一步查找括号——`find_first_unescaped` 查找第一个未转义的 `(`，`find_last_unescaped` 查找最后一个未转义的 `)`。`find_first_unescaped` 和 `find_last_unescaped` 处理转义字符，确保括号内的括号不被误识别。
+解析逻辑分两步。第一步查找括号——`find_first_unescaped` 查找第一个未转义的 `(`，`find_last_unescaped` 查找最后一个未转义的 `)`。这两个函数处理转义字符，确保括号内的括号不被误识别。
 
 第二步如果找到匹配的括号对，提取工具名和内容。`trimmed[..open]` 是括号前的部分（工具名），`trimmed[open + 1..close]` 是括号内的内容（匹配参数）。`parse_rule_matcher` 把内容解析为 `PermissionRuleMatcher`——如果内容以 `*` 结尾，解析为 `Prefix`（去掉 `*`）；否则解析为 `Exact`。
 
@@ -340,11 +259,11 @@ impl PermissionRule {
     }
 ```
 
-匹配分两步。第一步工具名必须完全匹配——`self.tool_name != tool_name` 时直接返回 `false`。注意 `self.tool_name` 在 `parse` 时已经转小写，但传入的 `tool_name` 可能不是小写——这里假设调用方已经做了规范化。
+匹配分两步。第一步工具名必须完全匹配——`self.tool_name` 在 `parse` 时已经转小写，但传入的 `tool_name` 可能不是小写——这里假设调用方已经做了规范化。
 
 第二步根据 matcher 类型匹配输入内容。`Any` 直接返回 `true`。`Exact` 和 `Prefix` 都需要先从输入中提取主体（`extract_permission_subject`），然后做精确或前缀匹配。`is_some_and` 是 `Option` 的方法——`Some` 时应用闭包，`None` 时返回 `false`。
 
-`extract_permission_subject` 从工具输入的 JSON payload 中提取匹配主体——通常是 `command`（bash 工具）、`path`（文件工具）或 `file_path` 字段的值。这个函数把 JSON 字符串解析后提取关键字段，作为规则匹配的候选。
+`extract_permission_subject` 从工具输入的 JSON payload 中提取匹配主体——通常是 `command`（bash 工具）、`path`（文件工具）或 `file_path` 字段的值。
 
 ### authorize_with_context：授权评估流程
 
@@ -353,8 +272,6 @@ impl PermissionRule {
 ```rust
 // claw-code/rust/crates/runtime/src/permissions.rs
 
-    #[must_use]
-    #[allow(clippy::too_many_lines)]
     pub fn authorize_with_context(
         &self,
         tool_name: &str,
@@ -408,12 +325,7 @@ impl PermissionRule {
                     ToOwned::to_owned,
                 );
                 return Self::prompt_or_deny(
-                    tool_name,
-                    input,
-                    current_mode,
-                    required_mode,
-                    Some(reason),
-                    prompter,
+                    tool_name, input, current_mode, required_mode, Some(reason), prompter,
                 );
             }
             Some(PermissionOverride::Allow) => {
@@ -423,12 +335,7 @@ impl PermissionRule {
                         rule.raw
                     );
                     return Self::prompt_or_deny(
-                        tool_name,
-                        input,
-                        current_mode,
-                        required_mode,
-                        Some(reason),
-                        prompter,
+                        tool_name, input, current_mode, required_mode, Some(reason), prompter,
                     );
                 }
                 if allow_rule.is_some()
@@ -463,12 +370,7 @@ impl PermissionRule {
                 rule.raw
             );
             return Self::prompt_or_deny(
-                tool_name,
-                input,
-                current_mode,
-                required_mode,
-                Some(reason),
-                prompter,
+                tool_name, input, current_mode, required_mode, Some(reason), prompter,
             );
         }
 
@@ -489,12 +391,7 @@ impl PermissionRule {
                 required_mode.as_str()
             ));
             return Self::prompt_or_deny(
-                tool_name,
-                input,
-                current_mode,
-                required_mode,
-                reason,
-                prompter,
+                tool_name, input, current_mode, required_mode, reason, prompter,
             );
         }
 
@@ -508,13 +405,7 @@ impl PermissionRule {
     }
 ```
 
-正常评估分四步。第一步检查 ask 规则——如果匹配，强制进入交互确认。即使当前模式是 `Allow` 或 `DangerFullAccess`，ask 规则也能强制确认。这是安全设计——ask 规则让用户对特定操作保持控制权。
-
-第二步检查是否允许——三个条件任一满足即允许：`allow_rule.is_some()`（allow 规则匹配）、`current_mode == Allow`（Allow 模式无条件允许）、`current_mode >= required_mode`（权限级别满足要求）。`current_mode >= required_mode` 利用 `PermissionMode` 的 `Ord` trait——`WorkspaceWrite >= ReadOnly` 为 `true`，`ReadOnly >= WorkspaceWrite` 为 `false`。
-
-第三步检查是否需要确认——`Prompt` 模式总是需要确认，`WorkspaceWrite` 模式当工具要求 `DangerFullAccess` 时也需要确认（权限升级）。`prompt_or_deny` 如果有 prompter 则弹出确认，没有则拒绝。
-
-第四步默认拒绝——如果以上都不满足，返回拒绝，错误消息说明需要的权限级别和当前级别。
+正常评估分四步。第一步检查 ask 规则——如果匹配，强制进入交互确认。即使当前模式是 `Allow` 或 `DangerFullAccess`，ask 规则也能强制确认。第二步检查是否允许——三个条件任一满足即允许：`allow_rule.is_some()`（allow 规则匹配）、`current_mode == Allow`（Allow 模式无条件允许）、`current_mode >= required_mode`（权限级别满足要求）。第三步检查是否需要确认——`Prompt` 模式总是需要确认，`WorkspaceWrite` 模式当工具要求 `DangerFullAccess` 时也需要确认（权限升级）。第四步默认拒绝——如果以上都不满足，返回拒绝，错误消息说明需要的权限级别和当前级别。
 
 ### prompt_or_deny：交互确认
 
@@ -560,42 +451,9 @@ impl PermissionRule {
 
 `prompter.as_mut()` 是 `Option<&mut dyn PermissionPrompter>` 的可变借用。`Some` 时调用 `decide`，返回 `Allow` 或 `Deny`。`None` 时直接拒绝——没有 prompter 就不能确认，安全保守。
 
-```java
-interface PermissionPrompter {
-    PermissionPromptDecision decide(PermissionRequest request);
-}
-```
-
 CLI 前端实现这个接口，在 `decide` 方法中显示提示并等待用户输入。非交互环境（如 CI）不提供 prompter，所有需要确认的操作自动拒绝。
 
-```mermaid
-graph TD
-    A["authorize_with_context"] --> B{工具在 denied_tools 中?}
-    B -->|是| C["Deny: denied_tools 配置"]
-    B -->|否| D{匹配 deny 规则?}
-    D -->|是| C
-    D -->|否| E{Hook override?}
-    E -->|Deny| C
-    E -->|Ask| F["prompt_or_deny"]
-    E -->|Allow| G{匹配 ask 规则?}
-    G -->|是| F
-    G -->|否| H{allow 规则 或 Allow 模式 或 级别满足?}
-    H -->|是| I["Allow"]
-    H -->|否| J["继续正常评估"]
-    E -->|None| J
-    J --> K{匹配 ask 规则?}
-    K -->|是| F
-    K -->|否| L{allow 规则 或 Allow 模式 或 级别满足?}
-    L -->|是| I
-    L -->|否| M{Prompt 模式 或 权限升级?}
-    M -->|是| F
-    M -->|否| N["Deny: 权限不足"]
-    F --> O{有 prompter?}
-    O -->|是| P["用户确认"]
-    O -->|否| Q["Deny: 无 prompter"]
-```
-
-## 7.3 PermissionEnforcer：执行层
+## 8.3 PermissionEnforcer：执行层
 
 ### EnforcementResult
 
@@ -619,7 +477,7 @@ pub enum EnforcementResult {
 
 `#[serde(tag = "outcome")]` 让 JSON 序列化时用 `outcome` 字段区分变体——`{"outcome": "Allowed"}` 或 `{"outcome": "Denied", "tool": "...", ...}`。
 
-`Denied` 变体携带四个字段：`tool`（被拒绝的工具名）、`active_mode`（当前权限模式）、`required_mode`（工具要求的权限模式）、`reason`（拒绝原因）。这些信息用于错误报告和调试——用户可以看到"工具 X 需要 workspace-write 权限，当前是 read-only"。
+`Denied` 变体携带四个字段：`tool`（被拒绝的工具名）、`active_mode`（当前权限模式）、`required_mode`（工具要求的权限模式）、`reason`（拒绝原因）。这些信息用于错误报告和调试。
 
 ### check 方法
 
@@ -651,7 +509,7 @@ pub fn check(&self, tool_name: &str, input: &str) -> EnforcementResult {
 }
 ```
 
-`Prompt` 模式直接返回 `Allowed`——交互确认由调用方负责，enforcer 不硬拒绝。注释说明"defer to the caller's interactive prompt flow rather than hard-denying (the enforcer has no prompter)"。enforcer 没有 prompter，无法做交互确认，因此 Prompt 模式下把决策权交给上层。
+`Prompt` 模式直接返回 `Allowed`——交互确认由调用方负责，enforcer 不硬拒绝。enforcer 没有 prompter，无法做交互确认，因此 Prompt 模式下把决策权交给上层。
 
 其他模式下调用 `policy.authorize`——注意传 `None` 作为 prompter，这意味着 enforcer 层面的检查不会弹出交互确认。如果策略要求确认但没有 prompter，`prompt_or_deny` 会返回 `Deny`。
 
@@ -691,7 +549,7 @@ pub fn check_with_required_mode(
 }
 ```
 
-这个方法不查规则，只做权限级别比较——`active_mode >= required_mode`。如果当前级别满足动态要求的级别，允许；否则拒绝。这个方法被 `execute_tool_with_enforcer` 调用（第5章），用于 bash 命令分类后的权限检查——`classify_bash_permission` 把 `ls` 命令降级为 `WorkspaceWrite`，然后 `check_with_required_mode` 检查 `active_mode >= WorkspaceWrite`。
+这个方法不查规则，只做权限级别比较——`active_mode >= required_mode`。如果当前级别满足动态要求的级别，允许；否则拒绝。这个方法被 `execute_tool_with_enforcer` 调用（第6章），用于 bash 命令分类后的权限检查——`classify_bash_permission` 把 `ls` 命令降级为 `WorkspaceWrite`，然后 `check_with_required_mode` 检查 `active_mode >= WorkspaceWrite`。
 
 ### check_file_write：工作区边界检查
 
@@ -736,7 +594,7 @@ pub fn check_file_write(&self, path: &str, workspace_root: &str) -> EnforcementR
 }
 ```
 
-五种权限模式分别处理。`ReadOnly` 直接拒绝——只读模式不允许任何文件写入。`WorkspaceWrite` 调用 `is_within_workspace` 检查路径是否在工作区内——在工作区内允许，在工作区外拒绝（required_mode 提升为 `DangerFullAccess`）。`Allow` 和 `DangerFullAccess` 无条件允许。`Prompt` 拒绝——enforcer 没有 prompter，prompt 模式下的文件写入交给上层处理。
+五种权限模式分别处理。`ReadOnly` 直接拒绝。`WorkspaceWrite` 调用 `is_within_workspace` 检查路径是否在工作区内——在工作区内允许，在工作区外拒绝（required_mode 提升为 `DangerFullAccess`）。`Allow` 和 `DangerFullAccess` 无条件允许。`Prompt` 拒绝——enforcer 没有 prompter，prompt 模式下的文件写入交给上层处理。
 
 ### is_within_workspace：词法路径规范化
 
@@ -764,9 +622,7 @@ fn is_within_workspace(path: &str, workspace_root: &str) -> bool {
 }
 ```
 
-函数分三步。第一步拼接路径——如果是绝对路径（以 `/` 开头），直接使用；如果是相对路径，拼接到 workspace_root 后面。
-
-第二步词法规范化——`lexically_normalize` 折叠 `.` 和 `..` 但不访问文件系统。第三步比较——规范化后的路径等于 root 或以 `root/` 开头。`root_with_slash` 确保 `root` 以 `/` 结尾，避免 `/workspace-evil` 被误判为 `/workspace` 的子路径。
+函数分三步。第一步拼接路径——如果是绝对路径（以 `/` 开头），直接使用；如果是相对路径，拼接到 workspace_root 后面。第二步词法规范化——`lexically_normalize` 折叠 `.` 和 `..` 但不访问文件系统。第三步比较——规范化后的路径等于 root 或以 `root/` 开头。`root_with_slash` 确保 `root` 以 `/` 结尾，避免 `/workspace-evil` 被误判为 `/workspace` 的子路径。
 
 `lexically_normalize` 用栈算法折叠路径组件：
 
@@ -796,96 +652,159 @@ fn lexically_normalize(path: &str) -> String {
 
 `path.split('/')` 把路径按 `/` 分割为组件。`match` 处理每种组件：空字符串和 `.` 忽略（`.` 表示当前目录，无意义），`..` 弹出栈顶（回到上级目录），其他组件压入栈。
 
-`stack.pop()` 在栈为空时返回 `None` 但不报错——这意味着 `..` 超出根目录时被截断。比如 `/workspace/../../etc` 规范化后是 `/etc`（两个 `..` 把 `workspace` 弹出后继续弹出根目录的空栈，`etc` 压入），不会逃逸到 `/etc`。实际上，因为绝对路径的 `split('/')` 第一个组件是空字符串（被忽略），`/../../etc` 的栈操作是：`..` 弹空栈（无效果），`..` 弹空栈（无效果），`etc` 压入。最终结果是 `/etc`。但 `is_within_workspace` 会检查 `/etc` 是否以 `/workspace/` 开头——不是，所以拒绝。
+`stack.pop()` 在栈为空时返回 `None` 但不报错——这意味着 `..` 超出根目录时被截断。词法规范化不访问文件系统——这是关键设计。写入操作的目标路径可能还不存在（新文件），无法用 `canonicalize` 解析符号链接。词法规范化不依赖文件系统存在性，始终能正确折叠 `..`。代价是无法检测符号链接逃逸——但 `resolve()` 可以在更高层做符号链接解析，两者互补。
 
-词法规范化不访问文件系统——这是关键设计。写入操作的目标路径可能还不存在（新文件），无法用 `canonicalize` 解析符号链接。词法规范化不依赖文件系统存在性，始终能正确折叠 `..`。代价是无法检测符号链接逃逸——但 Python 端的 `WorkspacePathScope` 做了符号链接解析，两者互补。
+## 8.4 TrustResolver：工作区信任
 
-### check_bash：命令只读分类
-
-`check_bash` 在不同权限模式下对 bash 命令做不同处理：
+`trust_resolver.rs` 实现了工作区信任决策。当 Agent 首次进入一个新目录时，系统需要判断这个目录是否可信：
 
 ```rust
-// claw-code/rust/crates/runtime/src/permission_enforcer.rs
+// claw-code/rust/crates/runtime/src/trust_resolver.rs
 
-pub fn check_bash(&self, command: &str) -> EnforcementResult {
-    let mode = self.policy.active_mode();
+pub enum TrustPolicy {
+    AutoTrust,
+    RequireApproval,
+    Deny,
+}
+```
 
-    match mode {
-        PermissionMode::ReadOnly => {
-            if is_read_only_command(command) {
-                EnforcementResult::Allowed
-            } else {
-                EnforcementResult::Denied {
-                    tool: "bash".to_owned(),
-                    active_mode: mode.as_str().to_owned(),
-                    required_mode: PermissionMode::WorkspaceWrite.as_str().to_owned(),
-                    reason: format!(
-                        "command may modify state; not allowed in '{}' mode",
-                        mode.as_str()
-                    ),
-                }
+`AutoTrust` 表示自动信任（白名单内的路径）。`RequireApproval` 需要用户手动确认。`Deny` 直接拒绝信任。
+
+信任决策基于白名单匹配：
+
+```rust
+// claw-code/rust/crates/runtime/src/trust_resolver.rs
+
+pub struct TrustAllowlistEntry {
+    pub pattern: String,
+    pub worktree_pattern: Option<String>,
+    pub description: Option<String>,
+}
+```
+
+`pattern` 是仓库路径或 glob 模式。`worktree_pattern` 是可选的工作树子路径模式。当当前工作目录匹配白名单中的某个条目时，自动授予信任；否则弹出信任提示等待用户决策。
+
+信任事件用于审计和遥测：
+
+```rust
+// claw-code/rust/crates/runtime/src/trust_resolver.rs
+
+pub enum TrustEvent {
+    TrustRequired { cwd: String, repo: Option<String>, worktree: Option<String> },
+    TrustResolved { cwd: String, policy: TrustPolicy, resolution: TrustResolution },
+    TrustDenied { cwd: String, reason: String },
+}
+
+pub enum TrustResolution {
+    AutoAllowlisted,
+    ManualApproval,
+}
+```
+
+`TrustRequired` 在需要信任决策时发出。`TrustResolved` 在信任被解决时发出，携带应用的策略和解决方式。`TrustDenied` 在信任被拒绝时发出。这些事件可以被 SessionTracer 记录，用于后续审计。
+
+## 8.5 PolicyEngine：Lane 工作流策略
+
+`policy_engine.rs` 为 Lane 工作流（第11章展开）提供策略规则引擎：
+
+```rust
+// claw-code/rust/crates/runtime/src/policy_engine.rs
+
+pub struct PolicyRule {
+    pub name: String,
+    pub condition: PolicyCondition,
+    pub action: PolicyAction,
+    pub priority: u32,
+}
+```
+
+`PolicyRule` 是条件-动作规则：当 `condition` 满足时，执行 `action`。`priority` 用于规则冲突时的优先级排序。
+
+`PolicyCondition` 支持组合逻辑和多种状态检查：
+
+```rust
+// claw-code/rust/crates/runtime/src/policy_engine.rs
+
+pub enum PolicyCondition {
+    And(Vec<PolicyCondition>),
+    Or(Vec<PolicyCondition>),
+    GreenAt { level: GreenLevel },
+    StaleBranch,
+    StartupBlocked,
+    LaneCompleted,
+    ReviewPassed,
+    ScopedDiff,
+    TimedOut { duration: Duration },
+    RetryAvailable,
+    RebaseRequired,
+    StaleCleanupRequired,
+    ApprovalTokenPresent,
+    ApprovalTokenMissing,
+}
+```
+
+`And` 和 `Or` 支持嵌套组合——可以构建复杂的复合条件。`GreenAt` 检查 Green Contract 满足级别。`StaleBranch` 检查分支是否超过 1 小时未更新。`LaneCompleted` 检查 Lane 是否已完成。`ReviewPassed` 检查代码审查是否通过。`TimedOut` 检查是否超过指定时长。`RetryAvailable` 检查重试次数是否未达上限。
+
+`matches` 方法递归评估条件：
+
+```rust
+// claw-code/rust/crates/runtime/src/policy_engine.rs
+
+impl PolicyCondition {
+    pub fn matches(&self, context: &LaneContext) -> bool {
+        match self {
+            Self::And(conditions) => conditions
+                .iter()
+                .all(|condition| condition.matches(context)),
+            Self::Or(conditions) => conditions
+                .iter()
+                .any(|condition| condition.matches(context)),
+            Self::GreenAt { level } => {
+                context.green_contract_satisfied && context.green_level >= *level
             }
+            Self::StaleBranch => context.branch_freshness >= STALE_BRANCH_THRESHOLD,
+            // ... 其他变体
         }
-        PermissionMode::Prompt => EnforcementResult::Denied {
-            tool: "bash".to_owned(),
-            active_mode: mode.as_str().to_owned(),
-            required_mode: PermissionMode::DangerFullAccess.as_str().to_owned(),
-            reason: "bash requires confirmation in prompt mode".to_owned(),
-        },
-        _ => EnforcementResult::Allowed,
     }
 }
 ```
 
-`ReadOnly` 模式下调用 `is_read_only_command` 判断命令是否只读——只读命令允许，可能修改状态的命令拒绝。`Prompt` 模式拒绝——enforcer 没有 prompter。其他模式（`WorkspaceWrite`、`Allow`、`DangerFullAccess`）无条件允许——`_` 通配符匹配剩余所有变体。
+`And` 用 `all` 短路——任一子条件不满足即返回 `false`。`Or` 用 `any` 短路——任一子条件满足即返回 `true`。这个设计与权限系统的 `PermissionRule` 类似，但面向的是工作流状态而非工具调用。
 
-`is_read_only_command` 用保守的启发式判断：
+`PolicyAction` 定义可执行的动作：
 
 ```rust
-// claw-code/rust/crates/runtime/src/permission_enforcer.rs
+// claw-code/rust/crates/runtime/src/policy_engine.rs
 
-fn is_read_only_command(command: &str) -> bool {
-    const SHELL_METACHARS: &[char] = &[';', '|', '&', '$', '`', '>', '<', '(', ')', '{', '}', '\n'];
-    if command.contains(SHELL_METACHARS) {
-        return false;
-    }
-
-    let mut tokens = command.split_whitespace();
-    let first_token = tokens.next().unwrap_or("").rsplit('/').next().unwrap_or("");
-
-    if first_token == "git" {
-        let subcommand = tokens.next().unwrap_or("");
-        return matches!(
-            subcommand,
-            "status" | "log" | "diff" | "show" | "branch"
-                | "rev-parse" | "ls-files" | "blame" | "describe" | "tag" | "remote"
-        );
-    }
+pub enum PolicyAction {
+    MergeToDev,
+    MergeForward,
+    RecoverOnce,
+    Retry { reason: String },
+    Rebase { reason: String },
+    Escalate { reason: String },
+    CloseoutLane,
+    CleanupSession,
+    CleanupStale { reason: String },
+    Reconcile { reason: ReconcileReason },
+    Notify { channel: String },
+    RequireApprovalToken { operation: String },
+}
 ```
 
-`SHELL_METACHARS` 定义了 12 个 shell 元字符——分号（命令链）、管道（管道符）、`&`（后台执行）、`$`（变量替换）、反引号（命令替换）、重定向符、括号（子shell）、花括号（花括号展开）、换行符。如果命令包含任何元字符，直接返回 `false`——无法仅从首 token 判断安全性。
-
-`first_token` 提取命令的第一个词——`split_whitespace().next()` 取第一个空白分隔的词，`rsplit('/').next()` 取路径的最后一部分（处理 `/usr/bin/ls` → `ls`）。
-
-`git` 命令只允许白名单内的子命令——`status`、`log`、`diff`、`show`、`branch` 等只读子命令。`git push`、`git commit`、`git reset` 等修改状态的子命令不在白名单中，返回 `false`。
-
-这个启发式的核心假设是：只要命令中包含任何 shell 元字符，就无法仅通过首 token 判断其安全性，因此一律拒绝。测试用例覆盖了命令链（`cat foo; rm bar`）、命令替换（`$(rm bar)`）、解释器执行（`python script.py`）等绕过场景。
-
-权限检查在 `FilterSecurityInterceptor` 中执行，通过 `AccessDecisionManager` 投票决定是否允许。claw-code 的权限模型围绕工具调用设计——工具名 + JSON payload + 权限模式。权限检查在 `PermissionEnforcer` 中执行，通过 `PermissionPolicy` 的规则评估决定是否允许。
-
-两者的核心差异在于权限的动态性。claw-code 的权限是动态的——同一个 `bash` 工具，`ls` 命令可能只需要 `ReadOnly`，`rm` 命令需要 `DangerFullAccess`。
-
-路径边界检查是 claw-code 独有的设计。claw-code 的 `is_within_workspace` 用词法规范化防止目录遍历攻击，Python 端的 `WorkspacePathScope` 用 `resolve()` 解析符号链接。两者互补——词法规范化快速但无法检测符号链接，符号链接解析准确但需要文件系统访问。
+这些动作对应 Lane 工作流的生命周期管理：合并到 dev、前向合并、恢复、重试、变基、升级、关闭 Lane、清理会话、协调、通知、要求审批令牌。
 
 ## 小结
 
-权限系统在 Python 端以 `ToolPermissionContext`（`permissions.py`）提供工具名黑名单（`deny_names` + `deny_prefixes`）和路径作用域委托（`workspace_scope`），`WorkspacePathScope`（`path_scope.py`）通过 `shlex` 分词提取路径候选，解析符号链接后验证是否在工作区根目录内。Rust 端 `PermissionMode`（`permissions.rs`）定义五级偏序模型（ReadOnly < WorkspaceWrite < DangerFullAccess，加 Prompt 和 Allow），`PermissionPolicy` 维护五组数据（active_mode、tool_requirements、allow/deny/ask 规则、denied_tools），`authorize_with_context` 按固定顺序执行多层检查：denied_tools → deny 规则 → 钩子覆盖 → ask 规则 → allow 规则/权限级别比较 → Prompt/权限升级确认 → 默认拒绝。`PermissionEnforcer`（`permission_enforcer.rs`）是执行层，`check_file_write` 用 `is_within_workspace` 做词法路径规范化（折叠 `.` 和 `..`，不访问文件系统），`check_bash` 用 `is_read_only_command` 做命令分类（shell 元字符检测 + git 白名单 + 解释器排除）。
+权限系统在 Rust 端以 `PermissionMode`（`permissions.rs`）定义五级偏序模型（ReadOnly < WorkspaceWrite < DangerFullAccess，加 Prompt 和 Allow），`PermissionPolicy` 维护五组数据（active_mode、tool_requirements、allow/deny/ask 规则、denied_tools），`authorize_with_context` 按固定顺序执行多层检查：denied_tools → deny 规则 → 钩子覆盖 → ask 规则 → allow 规则/权限级别比较 → Prompt/权限升级确认 → 默认拒绝。`PermissionEnforcer`（`permission_enforcer.rs`）是执行层，`check_file_write` 用 `is_within_workspace` 做词法路径规范化（折叠 `.` 和 `..`，不访问文件系统），`check_bash` 用 `is_read_only_command` 做命令分类（shell 元字符检测 + git 白名单 + 解释器排除）。
+
+`TrustResolver`（`trust_resolver.rs`）在工作区层面做信任决策，通过白名单自动信任已知路径，未知路径需要用户手动审批。`PolicyEngine`（`policy_engine.rs`）为 Lane 工作流提供条件-动作规则引擎，支持组合逻辑（And/Or）和多种状态检查（GreenAt、StaleBranch、ReviewPassed 等）。
 
 | 关键文件 | 核心机制 | 对应章节 |
 | --- | --- | --- |
-| `src/permissions.py` | `ToolPermissionContext`，黑名单与前缀匹配 | 本章 7.1 |
-| `src/path_scope.py` | `WorkspacePathScope`，路径提取与边界验证 | 本章 7.1 |
-| `rust/crates/runtime/src/permissions.rs` | `PermissionMode`，`PermissionPolicy`，规则引擎 | 本章 7.2 |
-| `rust/crates/runtime/src/permission_enforcer.rs` | `PermissionEnforcer`，路径规范化，命令分类 | 本章 7.3 |
+| `rust/crates/runtime/src/permissions.rs` | `PermissionMode`、`PermissionPolicy`、规则引擎 | 8.1-8.2 |
+| `rust/crates/runtime/src/permission_enforcer.rs` | `PermissionEnforcer`、路径规范化、命令分类 | 8.3 |
+| `rust/crates/runtime/src/trust_resolver.rs` | `TrustPolicy`、`TrustAllowlistEntry` | 8.4 |
+| `rust/crates/runtime/src/policy_engine.rs` | `PolicyRule`、`PolicyCondition`、`PolicyAction` | 8.5 |
 
 下一章将分析钩子系统——`HookRunner` 如何在工具执行前后插入用户自定义逻辑，PreToolUse 和 PostToolUse 钩子如何修改输入、覆盖权限和追加反馈。

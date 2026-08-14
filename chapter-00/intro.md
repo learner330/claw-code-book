@@ -1,51 +1,66 @@
-# 第0章 导读
+# 第0章 导读：本书定位与阅读指南
 
-本书逐模块拆解 claw-code 源码，覆盖 Agent 启动流程、Turn Loop 引擎、工具系统、权限模型、会话管理等核心机制。本章说明全书结构、claw-code 项目背景以及建议的阅读路径。
+本书逐模块拆解 claw-code 源码，覆盖 Agent 启动流程、API 通信、工具系统、Turn Loop 引擎、权限模型、会话管理等核心机制。本章说明全书结构、claw-code 项目背景以及建议的阅读路径。
 
 ## 0.1 本书结构
 
-全书共 18 章，按认知深度分为四个阶段：
+全书共 19 章（含导读），按内容深度分为两个阶段：
 
 | 阶段 | 章节 | 目标 |
 | --- | --- | --- |
-| 建立全局认知 | 第 0-3 章 | 理解 claw-code 是什么、LLM 最小必要知识、整体架构 |
-| 逐模块深入源码 | 第 4-11 章 | 启动流程、工具系统、查询引擎、权限、钩子、会话、协调器、插件 |
-| 跨语言实现对比 | 第 12-13 章 | Rust 重构版解读、TypeScript 原版与 Python/Rust 重写版对比 |
-| 工程实践与思维转型 | 第 14-17 章 | 配置层、思维转型、AI-Native 工作流、Multi-Agent 实战 |
+| 核心架构 | 第 1-13 章 | 理解 claw-code 是什么、整体架构、逐模块深入 Rust 源码 |
+| 对比与展望 | 第 14-18 章 | 三端实现对比、思维转型、配置层、工作流、生态展望 |
 
-前 3 章建立全局认知。第 1 章解释 Agent 的基本概念，第 2 章补充 LLM 的必要背景，第 3 章给出整体架构的全景图。
+第一阶段是全书核心，逐模块深入源码。第 1 章建立 Agent 概念框架，第 2 章给出整体架构全景，第 3 章追踪端到端执行路径，第 4-13 章逐个拆解 Rust workspace 中的核心 crate 与模块。
 
-第 4-11 章是全书核心，逐模块深入源码。每章聚焦一个子系统，从问题引入开始，贴出关键源码片段，分析设计决策，最后给出与 Java 生态的对比。这些章节的代码片段均来自 `claw-code/` 目录下的实际文件，标注了文件路径。
-
-第 12-13 章对比不同语言的实现。第 12 章专门分析 Rust 重构版的设计差异，第 13 章将 TypeScript 原版与 Python/Rust 重写版并置对比。
-
-第 14-17 章偏向工程实践。第 14 章讨论从 Java 工程师到 Agent 工程师的思维转型，第 15 章拆解配置层（Rules、Commands、MCP、Skills），第 16 章介绍 AI-Native 工程工作流，第 17 章给出一个研发全流程的 Multi-Agent 实战案例。
+第二阶段脱离具体源码，转向工程实践和生态展望。第 14 章对比 TypeScript/Python/Rust 三种实现，第 15 章讨论从 Java 工程师到 Agent 工程师的思维转型，第 16 章拆解配置层，第 17 章介绍 AI-Native 工程工作流，第 18 章总结全书并展望 claw-code 生态。
 
 ```mermaid
 graph LR
-    A[全局认知<br/>第0-3章] --> B[源码深入<br/>第4-11章]
-    B --> C[跨语言对比<br/>第12-13章]
-    C --> D[工程实践<br/>第14-17章]
+    A[核心架构<br/>第1-13章] --> B[对比与展望<br/>第14-18章]
 ```
 
 ## 0.2 claw-code 项目概览
 
-claw-code 是 Claude Code 的公开 Rust 实现，由 ultraworkers 组织维护。仓库包含两个主要代码基：Python 版的 `src/` 目录和 Rust 版的 `rust/` 目录。
+claw-code 是 Claude Code 的公开 Rust 实现，由 ultraworkers 组织维护。仓库的 canonical runtime 位于 `rust/` 目录下，是一个 Cargo workspace，包含 10 个 crate、约 11.6 万行 Rust 代码。
 
-Python 版是早期的移植工作空间，目前主要用于审计、辅助脚本和兼容性测试。Rust 版是当前的 canonical runtime，包含 `claw` CLI 主程序、API 客户端、运行时核心、工具集和插件系统。
+README 明确说明："The canonical implementation lives in `rust/`"，而 `src/` 目录下的 Python 代码是 "companion Python/reference workspace and audit helpers; not the primary runtime surface"。因此本书以 Rust 实现为唯一源码依据，不涉及 Python 端的代码分析。
 
-项目还包含三个独立组件：`claw-analog` 是一个轻量级代理外壳，适合 CI 和脚本场景；`claw-rag-service` 提供基于 SQLite 的语义搜索服务；`mock-anthropic-service` 用于可复现的测试 harness。
+Rust workspace 的核心 crate 包括：
 
-本书基于 claw-code 仓库的 main 分支，分析时间为 2025 年。如果后续源码有变动，以实际代码为准。
+| Crate | 职责 |
+| --- | --- |
+| `rusty-claude-cli` | CLI 入口，参数解析，TUI 渲染 |
+| `runtime` | 核心运行时：bootstrap、config、conversation、session、permissions、hooks、file ops、bash、mcp、task registry |
+| `api` | HTTP 客户端、SSE 流解析、多 provider 路由 |
+| `tools` | ToolPool、40 个工具规范定义、执行分发 |
+| `plugins` | 插件生命周期、bundled hooks |
+| `commands` | `/` 斜杠命令解析与分发 |
+| `telemetry` | Token 计数、成本追踪 |
+| `mock-anthropic-service` | 确定性 mock 服务，用于测试 |
+| `compat-harness` | 兼容性测试设施 |
+| `claw-rag-service` | RAG 检索服务（扩展层） |
+
+本书基于 claw-code 仓库的 main 分支，分析边界以 9-lane checkpoint（2026-04-03）为界。如果后续源码有变动，以实际代码为准。
 
 ## 0.3 阅读建议
 
-本书面向有 Java 后端经验的开发者。假设读者熟悉 Spring Boot、MyBatis、Maven 等工具，但不了解 LLM 和 Agent 的内部实现。
+本书面向有 Java 后端经验的开发者。假设读者熟悉 Spring Boot、Maven 等工具，但不了解 LLM 和 Agent 的内部实现。
 
-按章节顺序阅读效果最好。前 3 章建立全局认知，第 4-11 章逐模块深入源码，第 12-13 章对比不同语言实现，第 14-17 章偏向工程实践和思维转型。
+按章节顺序阅读效果最好。前 3 章建立全局认知，第 4-13 章逐模块深入源码，第 14-18 章偏向对比、思维转型和生态展望。
 
-每章的代码片段均来自 `claw-code/` 目录，标注了文件路径。建议在本地打开源码对照阅读。对于 Rust 代码，不需要深入掌握 Rust 语法，重点是理解设计思路和模块边界。
+每章的代码片段均来自 `claw-code/rust/` 目录下的实际文件，标注了文件路径。建议在本地打开源码对照阅读。对于 Rust 代码，不需要深入掌握 Rust 语法，重点是理解设计思路和模块边界。
+
+建议配合本地构建使用：
+
+```bash
+cd claw-code/rust
+cargo build --workspace
+./target/debug/claw doctor
+```
 
 ## 小结
 
-本章介绍了全书 18 章的四阶段结构：全局认知、源码深入、跨语言对比、工程实践。claw-code 是 Claude Code 的公开 Rust 实现，由 Python 版（`src/`）和 Rust 版（`rust/`）两个代码基组成，当前 canonical runtime 为 Rust 版。建议按顺序阅读，并在本地打开源码对照。
+本章介绍了全书的两阶段结构：第 1-13 章聚焦 claw-code 核心架构的 Rust 源码，第 14-18 章转向对比、思维转型和生态展望。claw-code 是 Claude Code 的公开 Rust 实现，canonical runtime 位于 `rust/` workspace 中，本书以 Rust 实现为唯一源码依据。建议按顺序阅读，并在本地构建后对照源码。
+
+下一章将建立 Agent 的概念框架，理解 Agent 与传统 CLI 的本质区别。

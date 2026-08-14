@@ -1,106 +1,28 @@
-# 第4章 启动流程深度解析：Bootstrap 七阶段
+# 第4章 启动流程深度解析：Bootstrap 七阶段与配置合并
 
 ## 本章概览
 
 本章分析 claw-code 从接收命令行参数到进入 Turn Loop 之间的完整初始化过程。对应第2章架构全景中的 `rusty-claude-cli` 和 `runtime::config` 两个模块。
 
-启动流程要解决的核心问题是：如何把一组命令行参数、若干个 JSON 配置文件、一个 CLAUDE.md 指令文件，组装成一个可运行的 Agent 系统。这个过程分为七个阶段（Bootstrap Graph），每个阶段有明确的职责，前一阶段的输出是后一阶段的输入。
+启动流程要解决的核心问题是：如何把一组命令行参数、若干个 JSON 配置文件、一个 CLAUDE.md 指令文件，组装成一个可运行的 Agent 系统。这个过程分为多个阶段（Bootstrap Plan），每个阶段有明确的职责，前一阶段的输出是后一阶段的输入。
 
-本章按数据流顺序展开：先看 CLI 入口如何接收和分发命令（4.1），再看 Bootstrap 七阶段如何编排初始化（4.2），然后深入配置加载的三层合并机制（4.3），最后看模型和权限的来源追踪（4.4）。
+本章按数据流顺序展开：先看 CLI 入口如何接收和分发命令（4.1），再看 Bootstrap 阶段如何编排初始化（4.2），然后深入配置加载的三层合并机制（4.3），最后看模型和权限的来源追踪（4.4）。
 
 | 关键文件 | 职责 |
 | --- | --- |
-| `src/main.py` | Python 版 CLI 入口，argparse 子命令系统 |
-| `src/bootstrap_graph.py` | Bootstrap 七阶段定义 |
-| `src/system_init.py` | 系统初始化，trust gate 分支 |
-| `src/setup.py` | 启动报告，prefetch 和延迟初始化 |
-| `src/deferred_init.py` | 延迟初始化，按 trust 分级加载 |
-| `src/prefetch.py` | 预加载：清单文件、密钥链、项目扫描 |
-| `rust/crates/rusty-claude-cli/src/main.rs` | Rust 版 CLI 入口，CliAction 枚举分发 |
+| `rust/crates/rusty-claude-cli/src/main.rs` | CLI 入口，`CliAction` 枚举分发 |
+| `rust/crates/runtime/src/bootstrap.rs` | Bootstrap 阶段定义与编排 |
 | `rust/crates/runtime/src/config.rs` | 三层配置加载与合并 |
 
 ## 4.1 CLI 入口与参数解析
 
-claw-code 有两个 CLI 入口：Python 版的 `src/main.py` 和 Rust 版的 `rust/crates/rusty-claude-cli/src/main.rs`。Python 版是移植工作区，用于盘点和模拟；Rust 版是生产 CLI，真正运行时使用的是这个。两者的设计思路不同，对比阅读能更好地理解架构意图。
-
-### Python 版：argparse 子命令系统
-
-Python 版用标准库的 `argparse` 构建子命令系统。`build_parser()` 函数注册了所有子命令：
-
-```python
-# claw-code/src/main.py
-
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description='Python porting workspace for the Claude Code rewrite effort'
-    )
-    subparsers = parser.add_subparsers(dest='command', required=True)
-    subparsers.add_parser('summary', help='render a Markdown summary of the Python porting workspace')
-    subparsers.add_parser('manifest', help='print the current Python workspace manifest')
-    subparsers.add_parser('parity-audit', help='compare the Python workspace against the local ignored TypeScript archive when available')
-    subparsers.add_parser('setup-report', help='render the startup/prefetch setup report')
-    subparsers.add_parser('command-graph', help='show command graph segmentation')
-    subparsers.add_parser('tool-pool', help='show assembled tool pool with default settings')
-    subparsers.add_parser('bootstrap-graph', help='show the mirrored bootstrap/runtime graph stages')
-    # ...更多子命令
-    return parser
-```
-
-`add_subparsers(dest='command', required=True)` 要求用户必须指定一个子命令，否则报错。每个 `add_parser` 调用注册一个子命令，并可以附加参数。比如 `turn-loop` 子命令接受 `--max-turns` 参数：
-
-```python
-# claw-code/src/main.py
-
-loop_parser = subparsers.add_parser('turn-loop', help='run a small stateful turn loop for the mirrored runtime')
-loop_parser.add_argument('prompt')
-loop_parser.add_argument('--limit', type=int, default=5)
-loop_parser.add_argument('--max-turns', type=int, default=3)
-loop_parser.add_argument('--structured-output', action='store_true')
-```
-
-`prompt` 是位置参数（必传），`--limit`、`--max-turns` 是可选参数，`--structured-output` 是开关。
-
-`main()` 函数是分发入口，用 if-elif 链逐个匹配 `args.command`：
-
-```python
-# claw-code/src/main.py
-
-def main(argv: list[str] | None = None) -> int:
-    parser = build_parser()
-    args = parser.parse_args(argv)
-    manifest = build_port_manifest()
-    if args.command == 'summary':
-        print(QueryEnginePort(manifest).render_summary())
-        return 0
-    if args.command == 'manifest':
-        print(manifest.to_markdown())
-        return 0
-    if args.command == 'parity-audit':
-        print(run_parity_audit().to_markdown())
-        return 0
-    # ...继续匹配其他子命令
-    parser.error(f'unknown command: {args.command}')
-    return 2
-```
-
-这里有一个设计细节值得注意：`build_port_manifest()` 在所有子命令分支之前无条件执行。这意味着无论用户运行哪个子命令，都会先构建完整的端口清单。对于 `summary` 和 `manifest` 子命令来说这是必要的，但对于 `bootstrap-graph` 这种只需要展示阶段定义的子命令来说，构建清单是多余的开销。
-
-Python 版为什么用 if-elif 而不是字典分发？因为每个子命令的参数集不同，`args` 对象上的属性也不同。如果用字典 `{'summary': handle_summary, ...}`，每个 handler 仍然需要从 `args` 上取自己的参数，类型检查和参数验证的逻辑不会减少。if-elif 链虽然没有字典优雅，但更直观——每个分支的上下文是完整的 `args` 对象，不需要额外的参数提取层。
-
-两者都是声明式的——命令和处理逻辑的绑定关系由框架在运行时通过反射建立。Python 版的 if-elif 链是命令式的——绑定关系在代码中显式写出来。前者更优雅，后者更透明。
-
-### Rust 版：CliAction 枚举与穷尽匹配
-
-Rust 版的入口结构完全不同。`main()` 函数只做错误包装，核心逻辑在 `run()` 中：
+Rust 版的入口在 `rust/crates/rusty-claude-cli/src/main.rs` 中。`main()` 函数只做错误包装，核心逻辑在 `run()` 中：
 
 ```rust
 // claw-code/rust/crates/rusty-claude-cli/src/main.rs
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().skip(1).collect();
-    // #824: suppress config deprecation prose warnings to stderr when JSON
-    // output mode is active.  Scan the raw argv before parse_args so the
-    // suppression is in place before any settings file is loaded.
     let json_mode = raw_args_request_json_output(&args);
     if json_mode {
         runtime::suppress_config_warnings_for_json_mode();
@@ -152,273 +74,106 @@ enum CliAction {
 }
 ```
 
-每个枚举变体对应一种 CLI 行为，变体携带的数据就是该行为所需的全部参数。比如 `Prompt` 变体携带 `prompt`（用户输入的文本）、`model`（模型选择）、`permission_mode`（权限模式）等，这些都是从命令行参数解析出来的。
+每个枚举变体对应一种 CLI 行为，变体携带的数据就是该行为所需的全部参数。Rust 的 `match` 是穷尽的——编译器强制处理所有枚举变体，否则编译不通过。这意味着如果未来新增了一个 `CliAction` 变体但忘了在 `match` 中处理，编译阶段就会报错。
 
-Rust 的 `match` 是穷尽的——编译器强制你处理所有枚举变体，否则编译不通过。这意味着如果未来新增了一个 `CliAction` 变体但忘了在 `match` 中处理，编译阶段就会报错。Python 版的 if-elif 链没有这个保证——如果新增了一个子命令但忘了加 if 分支，运行时才会发现（走到 `parser.error` 分支）。
-
-`CliAction::Prompt` 是最核心的变体——用户输入 `claude "帮我写一个快速排序"` 时就走这个分支。它携带的参数决定了后续整个 Bootstrap 流程的配置：
+`CliAction::Prompt` 是最核心的变体——用户输入 `claw "帮我写一个快速排序"` 时就走这个分支。`LiveCli::new()` 在这个分支中被调用，完成完整的运行时初始化：
 
 ```rust
 // claw-code/rust/crates/rusty-claude-cli/src/main.rs
 
-CliAction::Prompt {
-    prompt: String,                    // 用户的输入文本
-    model: String,                     // 模型选择（如 "anthropic/claude-opus-4-7"）
-    output_format: CliOutputFormat,    // 输出格式（text / json）
-    allowed_tools: Option<AllowedToolSet>,  // 工具白名单
-    permission_mode: PermissionMode,   // 权限模式
-    compact: bool,                     // 是否启用上下文压缩
-    base_commit: Option<String>,       // 基线 commit（用于检测代码变更）
-    reasoning_effort: Option<String>,  // 推理强度（如 "high"）
-    allow_broad_cwd: bool,             // 是否允许跨目录操作
+let resolved_model = resolve_repl_model(model)?;
+let mut cli = LiveCli::new(resolved_model, true, allowed_tools, permission_mode)?;
+cli.set_reasoning_effort(reasoning_effort);
+cli.run_turn_with_output(&effective_prompt, output_format, compact)?;
+```
+
+`LiveCli::new()` 内部依次完成：构建 system prompt、创建 session、调用 `build_runtime()` 组装运行时。这是 Bootstrap 的核心调用链。
+
+## 4.2 Bootstrap Plan：阶段编排
+
+Rust 版在 `runtime/src/bootstrap.rs` 中定义了启动阶段。`BootstrapPhase` 枚举列出了所有可能的阶段：
+
+```rust
+// claw-code/rust/crates/runtime/src/bootstrap.rs
+
+pub enum BootstrapPhase {
+    CliEntry,                    // CLI 入口
+    FastPathVersion,             // --version 快速退出
+    StartupProfiler,             // 启动性能分析
+    SystemPromptFastPath,        // System Prompt 快速路径
+    ChromeMcpFastPath,           // Chrome MCP 快速路径
+    DaemonWorkerFastPath,        // Daemon Worker 快速路径
+    BridgeFastPath,              // Bridge 快速路径
+    DaemonFastPath,              // Daemon 快速路径
+    BackgroundSessionFastPath,   // 后台会话快速路径
+    TemplateFastPath,            // 模板快速路径
+    EnvironmentRunnerFastPath,   // 环境运行器快速路径
+    MainRuntime,                 // 主运行时
 }
 ```
 
-这些参数在 `parse_args` 阶段从命令行解析出来，传入 Bootstrap 流程。其中 `permission_mode` 和 `model` 的来源会在 4.4 节展开。
+`BootstrapPlan` 按顺序编排这些阶段，默认计划包含全部 12 个阶段：
 
-## 4.2 Bootstrap Graph：七个启动阶段
+```rust
+// claw-code/rust/crates/runtime/src/bootstrap.rs
 
-### 七阶段定义
-
-Python 版在 `bootstrap_graph.py` 中定义了启动阶段图。这是一个非常简洁的数据结构——只有一个 `stages` 元组：
-
-```python
-# claw-code/src/bootstrap_graph.py
-
-from dataclasses import dataclass
-
-@dataclass(frozen=True)
-class BootstrapGraph:
-    stages: tuple[str, ...]
-
-    def as_markdown(self) -> str:
-        lines = ['# Bootstrap Graph', '']
-        lines.extend(f'- {stage}' for stage in self.stages)
-        return '\n'.join(lines)
-
-def build_bootstrap_graph() -> BootstrapGraph:
-    return BootstrapGraph(
-        stages=(
-            'top-level prefetch side effects',
-            'warning handler and environment guards',
-            'CLI parser and pre-action trust gate',
-            'setup() + commands/agents parallel load',
-            'deferred init after trust',
-            'mode routing: local / remote / ssh / teleport / direct-connect / deep-link',
-            'query engine submit loop',
-        )
-    )
+impl BootstrapPlan {
+    pub fn claude_code_default() -> Self {
+        Self::from_phases(vec![
+            BootstrapPhase::CliEntry,
+            BootstrapPhase::FastPathVersion,
+            BootstrapPhase::StartupProfiler,
+            BootstrapPhase::SystemPromptFastPath,
+            BootstrapPhase::ChromeMcpFastPath,
+            BootstrapPhase::DaemonWorkerFastPath,
+            BootstrapPhase::BridgeFastPath,
+            BootstrapPhase::DaemonFastPath,
+            BootstrapPhase::BackgroundSessionFastPath,
+            BootstrapPhase::TemplateFastPath,
+            BootstrapPhase::EnvironmentRunnerFastPath,
+            BootstrapPhase::MainRuntime,
+        ])
+    }
+}
 ```
 
-`@dataclass(frozen=True)` 让 `BootstrapGraph` 不可变——启动阶段定义在运行时不会被修改。`as_markdown()` 方法提供可读的输出格式，`bootstrap-graph` 子命令就是调用这个方法展示阶段列表。
+`from_phases` 方法会去除重复阶段，保证同一阶段不会执行两次：
 
-七个阶段构成了一条线性的初始化链路，每个阶段有明确的职责：
+```rust
+// claw-code/rust/crates/runtime/src/bootstrap.rs
 
-| 阶段 | 作用 | 对应代码 |
-| --- | --- | --- |
-| 1. prefetch side effects | 预加载清单文件、密钥链、项目扫描 | `prefetch.py` |
-| 2. environment guards | 设置全局警告处理器，检查运行环境 | `system_init.py` |
-| 3. CLI parser + trust gate | 解析参数，判断是否可信模式 | `main.py` |
-| 4. setup + parallel load | 加载命令定义和工具定义 | `setup.py` |
-| 5. deferred init | 延迟初始化非关键组件 | `deferred_init.py` |
-| 6. mode routing | 选择运行模式 | `main.py` 中的 mode 分发 |
-| 7. query engine submit loop | 启动 Turn Loop | `query_engine.py` |
+pub fn from_phases(phases: Vec<BootstrapPhase>) -> Self {
+    let mut deduped = Vec::new();
+    for phase in phases {
+        if !deduped.contains(&phase) {
+            deduped.push(phase);
+        }
+    }
+    Self { phases: deduped }
+}
+```
+
+这种设计允许不同启动场景自定义阶段序列，同时保证执行安全。比如 `--version` 只需要 `CliEntry` 和 `FastPathVersion` 两个阶段，不需要进入 `MainRuntime`。
 
 ```mermaid
 graph TD
-    A[1. prefetch] --> B[2. env guards]
-    B --> C[3. CLI parse + trust gate]
-    C --> D[4. setup + parallel load]
-    D --> E[5. deferred init]
-    E --> F{6. mode routing}
-    F -->|local| G[7. turn loop]
-    F -->|remote| H[remote runtime]
-    F -->|ssh| I[ssh runtime]
-    F -->|teleport| J[teleport runtime]
-    F -->|direct-connect| K[direct connect]
-    F -->|deep-link| L[deep link]
+    A[CliEntry] --> B[FastPathVersion]
+    B --> C{是否快速退出?}
+    C -->|是| D[直接输出版本/状态]
+    C -->|否| E[StartupProfiler]
+    E --> F[SystemPromptFastPath]
+    F --> G[ChromeMcpFastPath]
+    G --> H[DaemonWorkerFastPath]
+    H --> I[BridgeFastPath]
+    I --> J[DaemonFastPath]
+    J --> K[BackgroundSessionFastPath]
+    K --> L[TemplateFastPath]
+    L --> M[EnvironmentRunnerFastPath]
+    M --> N[MainRuntime]
+    N --> O[进入 Turn Loop]
 ```
 
-### 阶段 1-2：预加载与环境检查
-
-`prefetch.py` 定义了三个预加载函数，在启动最早期并行执行：
-
-```python
-# claw-code/src/prefetch.py
-
-@dataclass(frozen=True)
-class PrefetchResult:
-    name: str
-    started: bool
-    detail: str
-
-def start_mdm_raw_read() -> PrefetchResult:
-    return PrefetchResult('mdm_raw_read', True, 'Simulated MDM raw-read prefetch for workspace bootstrap')
-
-def start_keychain_prefetch() -> PrefetchResult:
-    return PrefetchResult('keychain_prefetch', True, 'Simulated keychain prefetch for trusted startup path')
-
-def start_project_scan(root: Path) -> PrefetchResult:
-    return PrefetchResult('project_scan', True, f'Scanned project root {root}')
-```
-
-三个预加载分别做不同的事：`mdm_raw_read` 预读设备管理清单（MDM），用于企业环境中检测安全策略；`keychain_prefetch` 预读系统密钥链，用于后续的 OAuth 凭证获取；`project_scan` 扫描项目根目录结构，用于后续的工具注册和路径检查。
-
-在 Python 移植版中这些函数返回的是模拟结果（`Simulated`），实际的预加载逻辑在 Rust 版中实现。但设计意图是清晰的：把 I/O 密集型操作提前到启动最早期，与后续的 CPU 密集型操作（参数解析、配置合并）并行，减少总启动时间。
-
-### 阶段 3：trust gate
-
-阶段 3 的核心是 trust gate——判断当前运行环境是否可信。`setup.py` 中的 `run_setup()` 函数接受 `trusted` 参数：
-
-```python
-# claw-code/src/setup.py
-
-def run_setup(cwd: Path | None = None, trusted: bool = True) -> SetupReport:
-    root = cwd or Path(__file__).resolve().parent.parent
-    prefetches = [
-        start_mdm_raw_read(),
-        start_keychain_prefetch(),
-        start_project_scan(root),
-    ]
-    return SetupReport(
-        setup=build_workspace_setup(),
-        prefetches=tuple(prefetches),
-        deferred_init=run_deferred_init(trusted=trusted),
-        trusted=trusted,
-        cwd=root,
-    )
-```
-
-`trusted` 参数传递给 `run_deferred_init()`，决定阶段 5 的加载范围。`build_workspace_setup()` 收集环境信息（Python 版本、平台）：
-
-```python
-# claw-code/src/setup.py
-
-def build_workspace_setup() -> WorkspaceSetup:
-    return WorkspaceSetup(
-        python_version='.'.join(str(part) for part in sys.version_info[:3]),
-        implementation=platform.python_implementation(),
-        platform_name=platform.platform(),
-    )
-```
-
-`WorkspaceSetup` 还定义了 `startup_steps()` 方法，返回启动步骤的有序列表：
-
-```python
-# claw-code/src/setup.py
-
-@dataclass(frozen=True)
-class WorkspaceSetup:
-    python_version: str
-    implementation: str
-    platform_name: str
-    test_command: str = 'python3 -m unittest discover -s tests -v'
-
-    def startup_steps(self) -> tuple[str, ...]:
-        return (
-            'start top-level prefetch side effects',
-            'build workspace context',
-            'load mirrored command snapshot',
-            'load mirrored tool snapshot',
-            'prepare parity audit hooks',
-            'apply trust-gated deferred init',
-        )
-```
-
-这六个步骤是阶段 4-5 的细化：构建工作区上下文 → 加载命令快照 → 加载工具快照 → 准备一致性审计钩子 → 应用 trust 分级的延迟初始化。`system_init.py` 中的 `build_system_init_message()` 把这些步骤格式化为可读的启动报告：
-
-```python
-# claw-code/src/system_init.py
-
-def build_system_init_message(trusted: bool = True) -> str:
-    setup = run_setup(trusted=trusted)
-    commands = get_commands()
-    tools = get_tools()
-    lines = [
-        '# System Init',
-        '',
-        f'Trusted: {setup.trusted}',
-        f'Built-in command names: {len(built_in_command_names())}',
-        f'Loaded command entries: {len(commands)}',
-        f'Loaded tool entries: {len(tools)}',
-        '',
-        'Startup steps:',
-        *(f'- {step}' for step in setup.setup.startup_steps()),
-    ]
-    return '\n'.join(lines)
-```
-
-这个函数同时调用了 `get_commands()` 和 `get_tools()`，这就是阶段 4 的工作——加载命令和工具的镜像快照。`trusted` 值直接出现在输出中，让用户可以通过 `setup-report` 子命令查看当前是否处于可信模式。
-
-### 阶段 5：deferred init
-
-`deferred_init.py` 定义了延迟初始化的结果：
-
-```python
-# claw-code/src/deferred_init.py
-
-@dataclass(frozen=True)
-class DeferredInitResult:
-    trusted: bool
-    plugin_init: bool
-    skill_init: bool
-    mcp_prefetch: bool
-    session_hooks: bool
-
-def run_deferred_init(trusted: bool) -> DeferredInitResult:
-    enabled = bool(trusted)
-    return DeferredInitResult(
-        trusted=trusted,
-        plugin_init=enabled,
-        skill_init=enabled,
-        mcp_prefetch=enabled,
-        session_hooks=enabled,
-    )
-```
-
-这里的设计意图是：不可信模式下，`plugin_init`、`skill_init`、`mcp_prefetch`、`session_hooks` 全部关闭。这四个组件都涉及外部代码执行——插件加载外部代码，MCP 连接外部进程，session hooks 执行用户定义的钩子函数。在不可信环境（如 CI 服务器、共享开发机）中，执行外部代码是安全风险，因此全部禁用。
-
-`as_lines()` 方法把结果格式化为可读的行列表：
-
-```python
-# claw-code/src/deferred_init.py
-
-    def as_lines(self) -> tuple[str, ...]:
-        return (
-            f'- plugin_init={self.plugin_init}',
-            f'- skill_init={self.skill_init}',
-            f'- mcp_prefetch={self.mcp_prefetch}',
-            f'- session_hooks={self.session_hooks}',
-        )
-```
-
-claw-code 的延迟初始化是按 trust 级别批量控制的——一个 `trusted` 布尔值决定四个组件的开关。这是因为 claw-code 的安全模型更粗粒度：要么完全可信（本地开发），要么完全不可信（CI 环境），中间状态很少需要。
-
-### 阶段 6：mode routing
-
-阶段 6 根据用户指定的运行模式选择执行路径。Python 版在 `main.py` 的 if-elif 链中处理六种模式：
-
-```python
-# claw-code/src/main.py
-
-if args.command == 'remote-mode':
-    print(run_remote_mode(args.target).as_text())
-    return 0
-if args.command == 'ssh-mode':
-    print(run_ssh_mode(args.target).as_text())
-    return 0
-if args.command == 'teleport-mode':
-    print(run_teleport_mode(args.target).as_text())
-    return 0
-if args.command == 'direct-connect-mode':
-    print(run_direct_connect(args.target).as_text())
-    return 0
-if args.command == 'deep-link-mode':
-    print(run_deep_link(args.target).as_text())
-    return 0
-```
-
-六种模式分别对应不同的远程执行场景：`remote` 通过 claw-code 协议连接，`ssh` 通过 SSH 隧道，`teleport` 通过 Teleport 基础设施，`direct-connect` 直连，`deep-link` 深度链接。默认模式是 `local`——在当前机器上直接执行，进入阶段 7 的 Turn Loop。
+`MainRuntime` 阶段是进入完整运行时的入口。在这个阶段，`build_runtime()` 被调用，它组装 `ConversationRuntime` 所需的所有组件：API 客户端、工具执行器、会话状态、权限策略。
 
 ## 4.3 配置加载与三层合并
 
@@ -435,7 +190,7 @@ pub struct ConfigLoader {
 }
 ```
 
-这两个路径决定了配置文件的搜索范围。`cwd` 是用户执行命令时的当前目录，`config_home` 是用户级配置的根目录。`ConfigLoader::default_for(cwd)` 用默认的 `config_home` 创建实例：
+这两个路径决定了配置文件的搜索范围。`ConfigLoader::default_for(cwd)` 用默认的 `config_home` 创建实例：
 
 ```rust
 // claw-code/rust/crates/runtime/src/config.rs
@@ -446,8 +201,6 @@ pub fn default_for(cwd: impl Into<PathBuf>) -> Self {
     Self { cwd, config_home }
 }
 ```
-
-`default_config_home()` 通常返回 `~/.claw/`，但可以通过环境变量覆盖。
 
 ### discover()：五文件发现
 
@@ -540,11 +293,9 @@ pub fn load(&self) -> Result<RuntimeConfig, ConfigError> {
 }
 ```
 
-这段代码做了五件事，每件都值得展开解释。
+这段代码做了五件事。第一，格式检查（`check_unsupported_format`）。在读取文件之前先检查文件格式是否被支持，比如不支持 YAML 或 TOML 格式的配置文件。
 
-第一，格式检查（`check_unsupported_format`）。在读取文件之前先检查文件格式是否被支持，比如不支持 YAML 或 TOML 格式的配置文件。这避免了"读到一半才发现格式不对"的尴尬。
-
-第二，可选读取（`read_optional_json_object`）。配置文件是可选的——五个文件中可能只有一两个存在。`OptionalConfigFile` 是一个枚举，`Loaded` 变体表示成功读取，其他变体（`NotFound`、`Skipped`）表示跳过。`let-else` 语法（`let OptionalConfigFile::Loaded(parsed) = ... else { continue; }`）在模式不匹配时直接跳过，避免了嵌套的 if。
+第二，可选读取（`read_optional_json_object`）。配置文件是可选的——五个文件中可能只有一两个存在。`OptionalConfigFile` 是一个枚举，`Loaded` 变体表示成功读取，其他变体表示跳过。`let-else` 语法在模式不匹配时直接跳过，避免了嵌套的 if。
 
 第三，Schema 验证（`validate_config_file`）。每个配置文件在合并前都要经过 schema 验证。验证不通过直接返回错误，不会把无效配置混入合并结果。验证还会收集警告（`validation.warnings`），比如使用了已弃用的配置项名。警告不阻断加载，但会通过 `emit_config_warning_once` 输出到 stderr。
 
@@ -568,11 +319,11 @@ fn emit_config_warning_once(warning: &str) {
 }
 ```
 
-`SUPPRESS_CONFIG_WARNINGS_STDERR` 就是 4.1 节中 `suppress_config_warnings_for_json_mode()` 设置的原子布尔值。当 JSON 模式开启时，警告直接丢弃。`guard.insert()` 返回 `true` 表示集合中之前没有这个警告（首次出现），输出到 stderr；返回 `false` 表示重复警告，跳过。这保证了同一个警告在一次运行中只输出一次，即使多个配置文件都触发了它。
+`SUPPRESS_CONFIG_WARNINGS_STDERR` 就是 4.1 节中 `suppress_config_warnings_for_json_mode()` 设置的原子布尔值。当 JSON 模式开启时，警告直接丢弃。`guard.insert()` 返回 `true` 表示集合中之前没有这个警告（首次出现），输出到 stderr；返回 `false` 表示重复警告，跳过。
 
-第四，MCP 服务器合并（`merge_mcp_servers`）。MCP 配置不是简单的键值对，而是嵌套的服务器定义，需要专门的合并逻辑。每个 MCP 服务器有 `command`、`args`、`env` 等字段，高优先级的完整定义会覆盖低优先级的。
+第四，MCP 服务器合并（`merge_mcp_servers`）。MCP 配置不是简单的键值对，而是嵌套的服务器定义，需要专门的合并逻辑。
 
-第五，深度合并（`deep_merge_objects`）。这是配置合并的核心算法。它递归地合并两个 JSON 对象：对于同名键，如果两个值都是对象，递归合并；否则后加载的值直接覆盖先加载的值。
+第五，深度合并（`deep_merge_objects`）。递归地合并两个 JSON 对象：对于同名键，如果两个值都是对象，递归合并；否则后加载的值直接覆盖先加载的值。
 
 ### ConfigFileReport：键覆盖追踪
 
@@ -583,33 +334,18 @@ fn emit_config_warning_once(warning: &str) {
 
 pub struct ConfigFileReport {
     pub entry: ConfigEntry,
-    pub loaded: bool,                   // 文件是否成功加载
-    pub status: ConfigFileStatus,       // 加载状态枚举
-    pub reason: Option<String>,         // 失败原因（当 status 不是 Loaded 时）
-    pub detail: Option<String>,         // 附加细节
-    pub precedence_rank: usize,         // 优先级排名（0 = 最低）
+    pub loaded: bool,
+    pub status: ConfigFileStatus,
+    pub reason: Option<String>,
+    pub detail: Option<String>,
+    pub precedence_rank: usize,
     pub wins_for_keys: Vec<String>,     // 此文件中生效的键
     pub shadowed_keys: Vec<String>,     // 被更高优先级覆盖的键
-    key_paths: Vec<String>,             // 所有键的完整路径
+    key_paths: Vec<String>,
 }
 ```
 
-`wins_for_keys` 和 `shadowed_keys` 是两个关键字段。如果一个键在当前文件中定义，且没有被更高优先级的文件覆盖，它出现在 `wins_for_keys` 中。如果被覆盖了，出现在 `shadowed_keys` 中。
-
-这个设计让 `claw status` 命令可以精确展示每个配置项来自哪个文件。用户不需要猜"为什么我的 `model` 配置没生效"——`claw status` 会告诉你 `model` 在 `~/.claw/settings.json` 中定义了，但被 `./.claw/settings.local.json` 覆盖了。
-
-`ConfigFileStatus` 枚举定义了四种状态：
-
-```rust
-// claw-code/rust/crates/runtime/src/config.rs
-
-pub enum ConfigFileStatus {
-    Loaded,     // 成功加载并合并
-    NotFound,   // 文件不存在
-    Skipped,    // 文件存在但被跳过（如格式不支持）
-    LoadError,  // 加载失败（如 JSON 解析错误）
-}
-```
+`wins_for_keys` 和 `shadowed_keys` 是两个关键字段。如果一个键在当前文件中定义，且没有被更高优先级的文件覆盖，它出现在 `wins_for_keys` 中。如果被覆盖了，出现在 `shadowed_keys` 中。这个设计让 `claw status` 命令可以精确展示每个配置项来自哪个文件。
 
 ### RuntimeFeatureConfig：合并后的配置视图
 
@@ -619,22 +355,22 @@ pub enum ConfigFileStatus {
 // claw-code/rust/crates/runtime/src/config.rs
 
 pub struct RuntimeFeatureConfig {
-    hooks: RuntimeHookConfig,           // 钩子配置
-    plugins: RuntimePluginConfig,       // 插件配置
-    mcp: McpConfigCollection,           // MCP 服务器配置
-    oauth: Option<OAuthConfig>,         // OAuth 凭证
-    model: Option<String>,              // 模型选择
-    aliases: BTreeMap<String, String>,  // 模型别名
-    permission_mode: Option<ResolvedPermissionMode>,  // 权限模式
-    sandbox: SandboxConfig,             // 沙箱配置
-    api_timeout: ApiTimeoutConfig,      // API 超时和重试
-    rules_import: RulesImportConfig,    // 外部框架规则导入
-    provider: RuntimeProviderConfig,    // 供应商配置
+    hooks: RuntimeHookConfig,
+    plugins: RuntimePluginConfig,
+    mcp: McpConfigCollection,
+    oauth: Option<OAuthConfig>,
+    model: Option<String>,
+    aliases: BTreeMap<String, String>,
+    permission_mode: Option<ResolvedPermissionMode>,
+    sandbox: SandboxConfig,
+    api_timeout: ApiTimeoutConfig,
+    rules_import: RulesImportConfig,
+    provider: RuntimeProviderConfig,
     // ...更多字段
 }
 ```
 
-每个字段对应一个子系统。比如 `hooks` 字段包含用户定义的 PreToolUse/PostToolUse 钩子（第8章展开），`mcp` 字段包含 MCP 服务器列表（第15章展开），`permission_mode` 字段决定权限级别（第7章展开）。`RuntimeFeatureConfig` 是配置加载的终点，也是后续所有子系统初始化的起点。
+每个字段对应一个子系统。`RuntimeFeatureConfig` 是配置加载的终点，也是后续所有子系统初始化的起点。
 
 ### API 超时配置
 
@@ -677,7 +413,7 @@ struct ModelProvenance {
     resolved: String,      // 最终使用的模型名（别名展开后）
     raw: Option<String>,   // 用户原始输入（别名展开前）
     source: ModelSource,   // 来源：Flag / Env / Config / Default
-    alias_resolved_to: Option<String>,  // 别名展开目标（当 raw != resolved 时）
+    alias_resolved_to: Option<String>,  // 别名展开目标
     env_var: Option<String>,            // 环境变量名（当 source=Env 时）
 }
 ```
@@ -711,8 +447,6 @@ const DEFAULT_MODEL: &str = "anthropic/claude-opus-4-7";
 // claw-code/rust/crates/rusty-claude-cli/src/main.rs
 
 fn from_env_or_config_or_default(cli_model: &str) -> Result<Self, String> {
-    // Only called when no --model flag was passed. Probe env first,
-    // then config, else fall back to default.
     if cli_model != DEFAULT_MODEL {
         let provenance = Self::from_resolved(cli_model, cli_model, ModelSource::Flag, None);
         provenance.validate()?;
@@ -724,13 +458,18 @@ fn from_env_or_config_or_default(cli_model: &str) -> Result<Self, String> {
         provenance.validate()?;
         return Ok(provenance);
     }
-    // ...继续检查 Config 和 Default
+    if let Some(config_model) = config_model_for_current_dir() {
+        let provenance = Self::from_raw(&config_model, ModelSource::Config, None);
+        provenance.validate()?;
+        return Ok(provenance);
+    }
+    Ok(Self::default_fallback())
 }
 ```
 
-这段代码的注释说明了逻辑：只在没有 `--model` flag 时调用。先检查环境变量，再检查配置文件，最后回退到默认值。每一层如果命中就立即返回，不再检查更低优先级的来源。
+这段代码的逻辑是：先检查是否有 `--model` flag，再检查环境变量（`CLAW_MODEL`、`ANTHROPIC_MODEL`、`ANTHROPIC_DEFAULT_MODEL`），再检查配置文件，最后回退到默认值。每一层如果命中就立即返回，不再检查更低优先级的来源。
 
-为什么要记录来源？因为 `claw status` 命令需要展示"当前模型来自哪里"。用户设置了 `--model opus` 但发现没生效，可能是因为环境变量 `CLAW_MODEL` 设置了不同的值。`ModelProvenance` 让这个问题可追溯——`claw status` 会显示 `model: anthropic/claude-opus-4-7 (source: env, env_var: CLAW_MODEL)`。
+为什么要记录来源？因为 `claw status` 命令需要展示"当前模型来自哪里"。用户设置了 `--model opus` 但发现没生效，可能是因为环境变量 `CLAW_MODEL` 设置了不同的值。`ModelProvenance` 让这个问题可追溯。
 
 ### PermissionModeProvenance：权限模式溯源
 
@@ -740,14 +479,11 @@ fn from_env_or_config_or_default(cli_model: &str) -> Result<Self, String> {
 // claw-code/rust/crates/rusty-claude-cli/src/main.rs
 
 enum PermissionModeSource {
-    Flag,
-    Env,
-    Config,
-    Default,
+    Flag, Env, Config, Default,
 }
 
 struct PermissionModeProvenance {
-    mode: PermissionMode,  // ReadOnly / WorkspaceWrite / DangerFullAccess
+    mode: PermissionMode,
     source: PermissionModeSource,
     env_var: Option<&'static str>,
 }
@@ -797,23 +533,15 @@ impl PermissionModeSource {
 
 当 `source` 是 `Default` 时，`is_explicit()` 返回 `false`，表示权限模式不是用户主动选择的，而是系统回退到默认值。这个信息在 `claw status` 中展示，提醒用户当前权限是默认值而非显式选择。
 
-claw-code 的 Bootstrap 分为：prefetch → env guards → CLI parse + trust gate → setup + parallel load → deferred init → mode routing → Turn Loop。
-
-两者的核心差异在 trust gate。claw-code 的 trust gate 是全局开关——一个布尔值决定四个子系统（插件、Skills、MCP、session hooks）的开关。
-
-配置合并机制几乎一致。claw-code 的 `ConfigLoader` 按三层排列（Local > Project > User），`deep_merge_objects` 递归合并。
-
 ## 小结
 
-claw-code 的启动流程从 CLI 入口到 Turn Loop 分为七个阶段。Python 版入口 `main.py` 用 `argparse` 构建子命令系统和 if-elif 分发链，Rust 版入口 `main.rs` 用 `CliAction` 枚举和穷尽 `match` 匹配，后者在编译时保证所有分支被处理。Bootstrap 七阶段从 prefetch 预加载开始，经过 trust gate 判断可信模式，按 trust 级别决定是否加载插件、Skills、MCP 和 session hooks。配置加载由 `ConfigLoader` 的 `discover()` 发现五个配置文件（三个层级，每层新旧两种格式），`load()` 逐个读取并通过 `deep_merge_objects` 递归合并，`ConfigFileReport` 记录每个键的覆盖关系。模型和权限的来源通过四级溯源（Flag → Env → Config → Default）记录，`claw status` 命令可展示完整来源链。
+claw-code 的启动流程从 CLI 入口到 Turn Loop 分为多个阶段。CLI 入口 `main.rs` 用 `CliAction` 枚举和穷尽 `match` 匹配分发命令，编译时保证所有分支被处理。Bootstrap 由 `BootstrapPlan` 按阶段编排，默认包含 12 个阶段，从 `CliEntry` 到 `MainRuntime`，`from_phases` 方法自动去重保证安全。配置加载由 `ConfigLoader` 的 `discover()` 发现五个配置文件（三个层级，每层新旧两种格式），`load()` 逐个读取并通过 `deep_merge_objects` 递归合并，同时进行 schema 验证和 MCP 服务器合并，`ConfigFileReport` 记录每个键的覆盖关系。模型和权限的来源通过四级溯源（Flag → Env → Config → Default）记录，`claw status` 命令可展示完整来源链。
 
 | 关键文件 | 核心机制 | 对应章节 |
 | --- | --- | --- |
-| `rusty-claude-cli/src/main.rs` | `CliAction` 枚举，`run()` 分发 | 本章 4.1 |
-| `src/bootstrap_graph.py` | 七阶段定义 | 本章 4.2 |
-| `src/setup.py` | trust gate，prefetch，延迟初始化 | 本章 4.2 |
-| `src/deferred_init.py` | 按 trust 批量控制四个子系统 | 本章 4.2 |
-| `rust/crates/runtime/src/config.rs` | `ConfigLoader`，三层合并，`ConfigFileReport` | 本章 4.3 |
+| `rusty-claude-cli/src/main.rs` | `CliAction` 枚举，`run()` 分发，`LiveCli::new()` | 本章 4.1 |
+| `runtime/src/bootstrap.rs` | `BootstrapPhase`，`BootstrapPlan` | 本章 4.2 |
+| `runtime/src/config.rs` | `ConfigLoader`，三层合并，`ConfigFileReport` | 本章 4.3 |
 | `rusty-claude-cli/src/main.rs` | `ModelProvenance`，`PermissionModeProvenance` | 本章 4.4 |
 
-下一章将分析工具系统——Bootstrap 阶段 4 加载的工具如何被定义、注册、发现和执行。
+下一章将分析 API 通信与模型交互——claw-code 如何与 LLM 建立 SSE 流式连接，以及如何实现多 provider 路由。
