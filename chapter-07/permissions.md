@@ -67,7 +67,7 @@ impl PermissionMode {
 }
 ```
 
-`match self` 是穷尽的——编译器保证所有变体都被处理。`Self::ReadOnly` 是 `PermissionMode::ReadOnly` 的简写，在 `impl` 块内可以用 `Self` 代替类型名。在 Java 中，这等价于枚举的 `toString()` 方法或 `@JsonValue` 注解。
+`match self` 是穷尽的——编译器保证所有变体都被处理。`Self::ReadOnly` 是 `PermissionMode::ReadOnly` 的简写，在 `impl` 块内可以用 `Self` 代替类型名。
 
 ### Python 端 ToolPermissionContext
 
@@ -85,8 +85,6 @@ class ToolPermissionContext:
 ```
 
 四个字段构成两层防御。`deny_names` 和 `deny_prefixes` 是工具名黑名单——`deny_names` 做精确匹配（`frozenset`，O(1) 查找），`deny_prefixes` 做前缀匹配（如 `"bash"` 拦截所有以 `bash` 开头的工具名）。`workspace_scope` 和 `cwd` 用于路径作用域验证——确保工具操作的路径在工作区内。
-
-`from_iterables` 工厂方法把列表参数转换为不可变类型：
 
 ```python
 # claw-code/src/permissions.py
@@ -189,8 +187,6 @@ impl PermissionPolicy {
         }
     }
 ```
-
-`with_tool_requirement` 用 Builder 模式添加工具权限要求：
 
 ```rust
 // claw-code/rust/crates/runtime/src/permissions.rs
@@ -564,8 +560,6 @@ impl PermissionRule {
 
 `prompter.as_mut()` 是 `Option<&mut dyn PermissionPrompter>` 的可变借用。`Some` 时调用 `decide`，返回 `Allow` 或 `Deny`。`None` 时直接拒绝——没有 prompter 就不能确认，安全保守。
 
-在 Java 中，`PermissionPrompter` 对应一个回调接口：
-
 ```java
 interface PermissionPrompter {
     PermissionPromptDecision decide(PermissionRequest request);
@@ -623,7 +617,7 @@ pub enum EnforcementResult {
 }
 ```
 
-`#[serde(tag = "outcome")]` 让 JSON 序列化时用 `outcome` 字段区分变体——`{"outcome": "Allowed"}` 或 `{"outcome": "Denied", "tool": "...", ...}`。这在 Java 中对应 Jackson 的 `@JsonTypeInfo(use = NAME, include = PROPERTY, property = "outcome")`。
+`#[serde(tag = "outcome")]` 让 JSON 序列化时用 `outcome` 字段区分变体——`{"outcome": "Allowed"}` 或 `{"outcome": "Denied", "tool": "...", ...}`。
 
 `Denied` 变体携带四个字段：`tool`（被拒绝的工具名）、`active_mode`（当前权限模式）、`required_mode`（工具要求的权限模式）、`reason`（拒绝原因）。这些信息用于错误报告和调试——用户可以看到"工具 X 需要 workspace-write 权限，当前是 read-only"。
 
@@ -770,7 +764,7 @@ fn is_within_workspace(path: &str, workspace_root: &str) -> bool {
 }
 ```
 
-函数分三步。第一步拼接路径——如果是绝对路径（以 `/` 开头），直接使用；如果是相对路径，拼接到 workspace_root 后面。`format!("{workspace_root}/{path}")` 是 Rust 的格式化字符串，等价于 Java 的 `String.format("%s/%s", workspaceRoot, path)`。
+函数分三步。第一步拼接路径——如果是绝对路径（以 `/` 开头），直接使用；如果是相对路径，拼接到 workspace_root 后面。
 
 第二步词法规范化——`lexically_normalize` 折叠 `.` 和 `..` 但不访问文件系统。第三步比较——规范化后的路径等于 root 或以 `root/` 开头。`root_with_slash` 确保 `root` 以 `/` 结尾，避免 `/workspace-evil` 被误判为 `/workspace` 的子路径。
 
@@ -805,8 +799,6 @@ fn lexically_normalize(path: &str) -> String {
 `stack.pop()` 在栈为空时返回 `None` 但不报错——这意味着 `..` 超出根目录时被截断。比如 `/workspace/../../etc` 规范化后是 `/etc`（两个 `..` 把 `workspace` 弹出后继续弹出根目录的空栈，`etc` 压入），不会逃逸到 `/etc`。实际上，因为绝对路径的 `split('/')` 第一个组件是空字符串（被忽略），`/../../etc` 的栈操作是：`..` 弹空栈（无效果），`..` 弹空栈（无效果），`etc` 压入。最终结果是 `/etc`。但 `is_within_workspace` 会检查 `/etc` 是否以 `/workspace/` 开头——不是，所以拒绝。
 
 词法规范化不访问文件系统——这是关键设计。写入操作的目标路径可能还不存在（新文件），无法用 `canonicalize` 解析符号链接。词法规范化不依赖文件系统存在性，始终能正确折叠 `..`。代价是无法检测符号链接逃逸——但 Python 端的 `WorkspacePathScope` 做了符号链接解析，两者互补。
-
-在 Java 中，`Path.normalize()` 做类似的词法规范化——`Paths.get("/workspace/../../etc").normalize()` 返回 `/etc`。但 Java 的 `Path.normalize()` 也是词法的，不解析符号链接。
 
 ### check_bash：命令只读分类
 
@@ -879,25 +871,11 @@ fn is_read_only_command(command: &str) -> bool {
 
 这个启发式的核心假设是：只要命令中包含任何 shell 元字符，就无法仅通过首 token 判断其安全性，因此一律拒绝。测试用例覆盖了命令链（`cat foo; rm bar`）、命令替换（`$(rm bar)`）、解释器执行（`python script.py`）等绕过场景。
 
-## 设计对比
+权限检查在 `FilterSecurityInterceptor` 中执行，通过 `AccessDecisionManager` 投票决定是否允许。claw-code 的权限模型围绕工具调用设计——工具名 + JSON payload + 权限模式。权限检查在 `PermissionEnforcer` 中执行，通过 `PermissionPolicy` 的规则评估决定是否允许。
 
-| claw-code 概念 | Java 生态对应 | 对比说明 |
-| --- | --- | --- |
-| `PermissionMode` 五级偏序 | Spring Security `GrantedAuthority` 层级 | 偏序比较 vs 投票机制 |
-| `PermissionPolicy` 规则评估 | Spring Security `AccessDecisionManager` | 两者都是多层规则评估 |
-| `PermissionRule` 语法 | Spring Security SpEL 表达式 | 字符串解析 vs 表达式引擎 |
-| `PermissionContext` 钩子覆盖 | Spring Security `RunAs` 机制 | 钩子覆盖权限 vs 临时身份切换 |
-| `PermissionEnforcer` 执行层 | Spring Security `FilterSecurityInterceptor` | 两者都在执行前做权限检查 |
-| `is_within_workspace` 词法规范化 | Java `Path.normalize()` + `startsWith()` | 两者都是词法折叠，不访问文件系统 |
-| `is_read_only_command` 启发式 | 无直接对应 | claw-code 独有，bash 命令分类 |
-| `denied_tools` 黑名单 | Spring Security `denyAll()` | 两者都是无条件拒绝 |
-| `PermissionPrompter` 交互确认 | Spring Security `AuthenticationEntryPoint` | 两者都处理需要用户介入的场景 |
+两者的核心差异在于权限的动态性。claw-code 的权限是动态的——同一个 `bash` 工具，`ls` 命令可能只需要 `ReadOnly`，`rm` 命令需要 `DangerFullAccess`。
 
-Spring Security 的权限模型围绕 HTTP 请求设计——URL 路径匹配 + HTTP 方法 + 用户角色。权限检查在 `FilterSecurityInterceptor` 中执行，通过 `AccessDecisionManager` 投票决定是否允许。claw-code 的权限模型围绕工具调用设计——工具名 + JSON payload + 权限模式。权限检查在 `PermissionEnforcer` 中执行，通过 `PermissionPolicy` 的规则评估决定是否允许。
-
-两者的核心差异在于权限的动态性。Spring Security 的权限通常是静态的——URL `/admin/**` 需要 `ROLE_ADMIN`，在配置时确定。claw-code 的权限是动态的——同一个 `bash` 工具，`ls` 命令可能只需要 `ReadOnly`，`rm` 命令需要 `DangerFullAccess`。`classify_bash_permission` 和 `is_read_only_command` 实现了这种动态分类，Spring Security 没有等价机制（SpEL 表达式可以做到，但不如专用函数直观）。
-
-路径边界检查是 claw-code 独有的设计。Spring Security 不涉及文件系统路径验证——Web 应用的安全边界是 URL，不是文件路径。claw-code 的 `is_within_workspace` 用词法规范化防止目录遍历攻击，Python 端的 `WorkspacePathScope` 用 `resolve()` 解析符号链接。两者互补——词法规范化快速但无法检测符号链接，符号链接解析准确但需要文件系统访问。
+路径边界检查是 claw-code 独有的设计。claw-code 的 `is_within_workspace` 用词法规范化防止目录遍历攻击，Python 端的 `WorkspacePathScope` 用 `resolve()` 解析符号链接。两者互补——词法规范化快速但无法检测符号链接，符号链接解析准确但需要文件系统访问。
 
 ## 小结
 

@@ -31,7 +31,6 @@ class ToolDefinition:
     name: str
     purpose: str
 
-
 DEFAULT_TOOLS = (
     ToolDefinition('port_manifest', 'Summarize the active Python workspace'),
     ToolDefinition('query_engine', 'Render a Python-first porting summary'),
@@ -39,8 +38,6 @@ DEFAULT_TOOLS = (
 ```
 
 `ToolDefinition` 只有两个字段：`name` 标识工具，`purpose` 描述用途。`DEFAULT_TOOLS` 定义了两个默认工具，都服务于 Python 移植审计场景，不是 Agent 运行时实际调用的工具。这个文件的角色是"接口原型"——它定义了工具的最小抽象，但真正的工具元数据在别处。
-
-在 Java 中，这相当于定义了一个接口 `interface ToolDefinition { String getName(); String getPurpose(); }`，然后用一个 record 或 immutable class 实现。Python 的 `@dataclass(frozen=True)` 等价于 Java 的 final class + 所有字段 final + 全参构造器 + equals/hashCode/toString 自动生成。
 
 真正承载工具元数据的是 `models.py` 中的 `PortingModule`：
 
@@ -75,7 +72,7 @@ pub struct ToolSpec {
 
 四个字段的含义和设计意图：
 
-`name` 用 `&'static str` 而不是 `String`。这意味着工具名在编译时就确定了，不需要堆分配。在 Java 中等价于 `private final String name`，但 Rust 的 `&'static str` 更进一步——它是一个指向程序只读数据段的引用，零分配开销。所有内置工具名（如 `"bash"`、`"read_file"`）都直接编译进二进制文件。
+`name` 用 `&'static str` 而不是 `String`。这意味着工具名在编译时就确定了，不需要堆分配。所有内置工具名（如 `"bash"`、`"read_file"`）都直接编译进二进制文件。
 
 `description` 也是 `&'static str`，原因相同。这个字段的内容会被发送给 LLM 作为工具说明——LLM 根据 description 决定何时使用这个工具。因此 description 的质量直接影响 Agent 的行为准确性。比如 `"Execute a shell command in the current workspace."` 清楚地告诉 LLM 这个工具的用途和作用域。
 
@@ -130,7 +127,7 @@ PORTED_TOOLS = load_tool_snapshot()
 
 `SNAPSHOT_PATH` 指向 `reference_data/tools_snapshot.json`，这个文件记录了原始 TypeScript 项目中所有工具模块的元数据，包括 `AgentTool`、`BashTool`、`FileEditTool`、`GrepTool` 等数十个工具条目。
 
-`@lru_cache(maxsize=1)` 保证函数只执行一次——首次调用读取文件并解析，后续调用直接返回缓存结果。在 Java 中等价于 Guava 的 `CacheBuilder.newBuilder().maximumSize(1)` 或简单的 `private volatile Tuple cached;` + double-checked locking。Python 的 `lru_cache` 装饰器是线程安全的（在 CPython 的 GIL 下），且自动处理缓存失效。
+`@lru_cache(maxsize=1)` 保证函数只执行一次——首次调用读取文件并解析，后续调用直接返回缓存结果。Python 的 `lru_cache` 装饰器是线程安全的（在 CPython 的 GIL 下），且自动处理缓存失效。
 
 所有工具的 `status` 统一设为 `'mirrored'`，表示这些是镜像自原始 TypeScript 实现的元数据记录，不是 Python 原生实现。模块级变量 `PORTED_TOOLS = load_tool_snapshot()` 在导入时立即执行，这意味着 `import tools` 就会触发文件读取。
 
@@ -160,7 +157,7 @@ def find_tools(query: str, limit: int = 20) -> list[PortingModule]:
 
 `tool_names()` 返回所有工具名的列表，是最简单的查询。`get_tool()` 做大小写不敏感的精确匹配——先用 `name.lower()` 把搜索词转小写，再和每个工具名的小写形式比较。`find_tools()` 做子串模糊搜索，同时在工具名和源文件路径中匹配，返回最多 `limit` 个结果。
 
-`get_tool()` 的时间复杂度是 O(n)，对每次调用都线性扫描整个工具列表。如果工具数量很大（如 Rust 端有 40+ 个工具），这会成为性能问题。但在 Python 端，工具列表是静态的快照，`lru_cache` 保证了快照只读一次，查询本身的 O(n) 在几十个工具的规模下可以接受。在 Java 中，如果需要更快的查找，可以用 `HashMap<String, PortingModule>` 做索引——但 Python 端这里是移植审计工具，不需要生产级性能。
+`get_tool()` 的时间复杂度是 O(n)，对每次调用都线性扫描整个工具列表。如果工具数量很大（如 Rust 端有 40+ 个工具），这会成为性能问题。但在 Python 端，工具列表是静态的快照，`lru_cache` 保证了快照只读一次，查询本身的 O(n) 在几十个工具的规模下可以接受。
 
 ### 工具池组装
 
@@ -308,8 +305,6 @@ pub struct GlobalToolRegistry {
 
 三层工具的来源不同。内置工具不在结构体字段中——它们通过 `mvp_tool_specs()` 函数静态返回，每次调用都重新生成 `Vec<ToolSpec>`。这个设计意味着内置工具定义是编译时常量，不占用 `GlobalToolRegistry` 的存储空间。
 
-在 Java 中，这相当于三层 Bean 注册：内置工具像 Spring Boot 的自动配置 Bean（框架内置），插件工具像通过 `@ComponentScan` 扫描到的 Bean（外部贡献），运行时工具像通过 `BeanDefinitionRegistry.registerBeanDefinition` 编程式注册的 Bean（动态添加）。
-
 `builtin()` 创建一个空的注册表（只有内置工具，无插件、无运行时工具、无 enforcer）：
 
 ```rust
@@ -328,7 +323,7 @@ impl GlobalToolRegistry {
 
 `#[must_use]` 注解告诉编译器：这个方法的返回值必须被使用，不能丢弃。如果调用 `GlobalToolRegistry::builtin()` 但不绑定返回值，编译器会发出警告。这是 Rust 的安全网——防止无意中创建了一个注册表却不用它。
 
-### Builder 模式与冲突检测
+### 构建器模式与冲突检测
 
 插件工具通过 `with_plugin_tools()` 注册：
 
@@ -366,7 +361,7 @@ pub fn with_plugin_tools(plugin_tools: Vec<PluginTool>) -> Result<Self, String> 
 
 第二次检测插件工具之间是否重名：`seen_plugin_names.insert(name.clone())` 返回 `false` 表示集合中已有同名工具，返回错误 `"duplicate plugin tool name"`。`BTreeSet::insert` 的返回值是 `bool`——`true` 表示新增成功（之前没有），`false` 表示已存在。利用这个返回值做去重检测是 Rust 的常见模式。
 
-返回类型是 `Result<Self, String>`——成功返回注册表，失败返回错误描述。在 Java 中这等价于 `throws ToolRegistrationException`，但 Rust 用 `Result` 强制调用方处理错误，不能像 Java 那样忽略 checked exception。
+返回类型是 `Result<Self, String>`——成功返回注册表，失败返回错误描述。
 
 运行时工具通过 `with_runtime_tools()` 追加：
 
@@ -401,7 +396,7 @@ pub fn with_runtime_tools(
 }
 ```
 
-`with_runtime_tools` 接受 `mut self`（获取所有权，可变），返回 `Result<Self, String>`。这是 Builder 模式的链式调用风格——`registry.with_plugin_tools(plugins)?.with_runtime_tools(runtime)?.with_enforcer(enforcer)`。
+`with_runtime_tools` 接受 `mut self`（获取所有权，可变），返回 `Result<Self, String>`。
 
 冲突检测把内置工具名和已注册的插件工具名合并到一个 `BTreeSet` 中，然后检查运行时工具名是否与之冲突。`chain()` 方法把两个迭代器串联——先迭代内置工具名，再迭代插件工具名。这确保运行时工具不能与内置工具或插件工具重名。
 
@@ -857,11 +852,9 @@ fn execute_tool_with_enforcer(
         }
 ```
 
-`#[aspect(LoggingAspect::new().log_args().log_result())]` 是一个 AOP（面向切面编程）注解，自动在函数执行前后记录参数和返回值。在 Java 中等价于 Spring AOP 的 `@Around` 注解 + 自定义切面。
-
 前六个基础工具（bash、read_file、write_file、edit_file、glob_search、grep_search）的执行模式一致，都是三步：反序列化输入 → 动态分类权限 → 执行。以 `bash` 为例：
 
-第一步 `from_value(input)?` 把 JSON `Value` 反序列化为 `BashCommandInput` 结构体。`from_value` 是 `serde_json` 的函数，等价于 Java 的 `ObjectMapper.readValue(json, Class)`。`?` 在反序列化失败时返回错误。
+第一步 `from_value(input)?` 把 JSON `Value` 反序列化为 `BashCommandInput` 结构体。`?` 在反序列化失败时返回错误。
 
 第二步 `classify_bash_permission(&bash_input.command)` 分析命令内容，动态确定权限级别。这是与静态 `required_permission` 不同的动态权限——`ToolSpec` 中 bash 的 `required_permission` 是 `DangerFullAccess`（最严格），但 `classify_bash_permission` 可能降级为 `WorkspaceWrite` 甚至 `ReadOnly`（如果命令是 `ls` 或 `cat`）。
 
@@ -882,7 +875,7 @@ fn execute_tool_with_enforcer(
         "Config" => from_value::<ConfigInput>(input).and_then(run_config),
 ```
 
-逻辑工具不需要动态权限分类——它们的权限级别是静态的（在 `ToolSpec` 中已定义），不因输入内容变化。因此用 `and_then` 链式调用：`from_value` 反序列化成功后直接调用 `run_*` 执行。`and_then` 等价于 Java 的 `flatMap`——`Result` 的 `and_then` 在 `Ok` 时应用函数，在 `Err` 时传递错误。
+逻辑工具不需要动态权限分类——它们的权限级别是静态的（在 `ToolSpec` 中已定义），不因输入内容变化。因此用 `and_then` 链式调用：`from_value` 反序列化成功后直接调用 `run_*` 执行。
 
 `"SendUserMessage" | "Brief"` 用 `|` 合并两个模式——两个工具名走同一个分支。这是因为 `Brief` 是 `SendUserMessage` 的旧名称，为了向后兼容两个名字都接受。
 
@@ -1063,7 +1056,7 @@ class ToolPermissionContext:
 
 `ToolPermissionContext` 持有四个字段。`deny_names` 是工具名黑名单（`frozenset`，不可变集合），`deny_prefixes` 是前缀黑名单（如 `"mcp"` 会拦截所有以 `mcp` 开头的工具）。`workspace_scope` 是工作区路径范围（`WorkspacePathScope` 对象），`cwd` 是当前工作目录。
 
-`from_iterables` 是工厂方法，把列表参数转换为不可变类型。所有工具名和前缀都转为小写——这与 Rust 端的 `canonical_allowed_tool_name` 规范化理念一致，确保大小写不影响匹配。`workspace_root` 和 `workspace_roots` 合并为一个列表，然后创建 `WorkspacePathScope`。`cwd` 通过 `expanduser().resolve()` 展开 `~` 并解析为绝对路径。
+所有工具名和前缀都转为小写——这与 Rust 端的 `canonical_allowed_tool_name` 规范化理念一致，确保大小写不影响匹配。`workspace_root` 和 `workspace_roots` 合并为一个列表，然后创建 `WorkspacePathScope`。`cwd` 通过 `expanduser().resolve()` 展开 `~` 并解析为绝对路径。
 
 `blocks` 方法做黑名单检查：
 
@@ -1211,29 +1204,15 @@ def _is_relative_to(path: Path, root: Path) -> bool:
 
 `Path.relative_to(root)` 尝试计算 `path` 相对于 `root` 的路径。如果 `path` 不在 `root` 下，抛出 `ValueError`。捕获异常返回 `False`。这是 Python 3.9 之前的标准写法——Python 3.9+ 有 `Path.is_relative_to()` 方法可以直接用。
 
-## 设计对比
+claw-code 的工具注册通过 `ToolSpec` 结构体命令式完成——每个工具的定义是代码中的数据结构，不是注解。声明式更优雅但更隐式（路由关系在运行时才建立），命令式更冗长但更透明（所有工具定义都在一个函数中可见）。
 
-| claw-code 概念 | Java 生态对应 | 对比说明 |
-| --- | --- | --- |
-| `ToolSpec`（name + description + schema + permission） | Spring `@Controller` 方法签名 + `@RequestMapping` + `@PreAuthorize` | claw-code 集中定义，Spring 分散注解 |
-| `GlobalToolRegistry` 三层叠加 | Spring IoC 容器 BeanDefinition 注册（内置 / ComponentScan / 编程式） | 三层来源一致，claw-code 做名称冲突检测 |
-| `mvp_tool_specs` + `deferred_tool_specs` | Spring `@Conditional` 条件 Bean + `@Lazy` 延迟初始化 | claw-code 按需搜索，Spring 按需创建 |
-| `execute_tool_with_enforcer` match 分发 | Spring `DispatcherServlet` 按 URL 路径分发到 Controller | 都是"注册表 + 分发器"模式，面向不同协议 |
-| `ToolSearch` 评分搜索 | Spring Boot Actuator 的 endpoint 列表 | claw-code 是运行时搜索，Actuator 是预定义列表 |
-| `classify_bash_permission` 动态权限 | Spring Security `@PreAuthorize` SpEL 表达式 | 两者都根据输入动态判定权限 |
-| `ToolPermissionContext` 黑名单 + 路径作用域 | Spring Security `SecurityFilterChain` denyAll + 路径匹配 | 机制一致，claw-code 额外做符号链接解析 |
-| `canonical_allowed_tool_name` CamelCase → snake_case | Java BeanPropertyName 的 getter → property 转换 | 两者都做命名规范化以支持多种写法 |
-| `search_tool_specs` 评分排序 | Spring Data 的 `Sort` + `Pageable` | 两者都按相关性排序返回 top N |
+动态权限分类是两者的共同设计。两者的核心思路一致：静态声明的权限（注解或 `ToolSpec.required_permission`）是默认值，运行时根据实际输入动态调整。
 
-Spring 的工具注册通过注解声明式完成——`@Controller` + `@RequestMapping` 自动注册路由，`@PreAuthorize` 声明权限。claw-code 的工具注册通过 `ToolSpec` 结构体命令式完成——每个工具的定义是代码中的数据结构，不是注解。声明式更优雅但更隐式（路由关系在运行时才建立），命令式更冗长但更透明（所有工具定义都在一个函数中可见）。
-
-动态权限分类是两者的共同设计。Spring Security 用 SpEL 表达式在 `@PreAuthorize("hasRole('ADMIN') and #dto.id > 0")` 中动态判定，claw-code 用 `classify_bash_permission` 函数分析命令内容后动态判定。两者的核心思路一致：静态声明的权限（注解或 `ToolSpec.required_permission`）是默认值，运行时根据实际输入动态调整。差异在于 Spring 的 SpEL 是通用的表达式语言，claw-code 的分类函数是针对特定工具的硬编码逻辑。
-
-路径作用域验证是 claw-code 独有的设计。Spring Security 的 `SecurityFilterChain` 做的是 URL 路径匹配（如 `/admin/**` 需要 ADMIN 角色），不涉及文件系统路径验证。claw-code 的 `WorkspacePathScope` 做的是文件系统路径验证——解析符号链接、展开 glob、检查路径是否在工作区内。这是因为 Agent 的工具直接操作文件系统，需要比 Web 应用更精细的路径安全控制。
+路径作用域验证是 claw-code 独有的设计。claw-code 的 `WorkspacePathScope` 做的是文件系统路径验证——解析符号链接、展开 glob、检查路径是否在工作区内。这是因为 Agent 的工具直接操作文件系统，需要比 Web 应用更精细的路径安全控制。
 
 ## 小结
 
-工具系统在 Python 端以 `tools.py` 为核心，通过 JSON 快照加载元数据（`PortingModule`），提供查询（`get_tool`、`find_tools`）、模拟执行（`execute_tool`）和工具池封装（`ToolPool`）。Rust 端的 `GlobalToolRegistry` 是完整实现，三层注册表（内置 `ToolSpec` + 插件 `PluginTool` + 运行时 `RuntimeToolDefinition`）通过 Builder 模式叠加，`with_plugin_tools` 和 `with_runtime_tools` 做名称冲突检测。内置工具由 `mvp_tool_specs()` 静态返回 40+ 个，其中六个基础工具始终对 LLM 可见，其余延迟工具通过 `ToolSearch` 的评分搜索按需发现。`execute_tool_with_enforcer` 是执行分发器，对涉及文件和 shell 的工具调用 `classify_*` 函数动态分类权限级别，再通过 `maybe_enforce_permission_check_with_mode` 做权限检查，最后调用 `run_*` 执行。Python 端的 `ToolPermissionContext` 和 `WorkspacePathScope` 提供黑名单过滤和路径作用域验证，`extract_path_candidates` 从 payload 中提取路径候选，`resolve()` 解析符号链接后检查是否在工作区根目录内。
+工具系统在 Python 端以 `tools.py` 为核心，通过 JSON 快照加载元数据（`PortingModule`），提供查询（`get_tool`、`find_tools`）、模拟执行（`execute_tool`）和工具池封装（`ToolPool`）。内置工具由 `mvp_tool_specs()` 静态返回 40+ 个，其中六个基础工具始终对 LLM 可见，其余延迟工具通过 `ToolSearch` 的评分搜索按需发现。`execute_tool_with_enforcer` 是执行分发器，对涉及文件和 shell 的工具调用 `classify_*` 函数动态分类权限级别，再通过 `maybe_enforce_permission_check_with_mode` 做权限检查，最后调用 `run_*` 执行。Python 端的 `ToolPermissionContext` 和 `WorkspacePathScope` 提供黑名单过滤和路径作用域验证，`extract_path_candidates` 从 payload 中提取路径候选，`resolve()` 解析符号链接后检查是否在工作区根目录内。
 
 | 关键文件 | 核心机制 | 对应章节 |
 | --- | --- | --- |

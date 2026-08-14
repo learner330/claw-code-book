@@ -4,7 +4,7 @@
 
 Agent 与 LLM 的交互不是单次请求-响应，而是多轮对话的累积过程。每一次用户输入、模型回复、工具执行结果都需要被记录，并在下一次请求时完整回传给模型。当对话长度逼近模型的上下文窗口时，还需要对历史消息进行压缩。会话管理就是解决"如何存储、如何恢复、如何压缩"这三个核心问题。
 
-claw-code 的会话管理横跨 Python 原型和 Rust 生产版。Python 端的 `StoredSession` 是一个极简的 frozen dataclass，以单个 JSON 文件存储；Rust 端的 `Session` 则是一个功能完整的状态载体，支持 JSONL 增量持久化、原子写入、日志轮转、工作空间命名空间隔离、自动压缩和心跳检测。从 Java 工程师的视角看，`Session` 相当于 `HttpSession`，`SessionStore` 相当于 `SessionRepository`，JSONL 增量追加相当于数据库的 WAL（Write-Ahead Log），而自动压缩相当于数据库的 Checkpoint。
+claw-code 的会话管理横跨 Python 原型和 Rust 生产版。Python 端的 `StoredSession` 是一个极简的 frozen dataclass，以单个 JSON 文件存储；Rust 端的 `Session` 则是一个功能完整的状态载体，支持 JSONL 增量持久化、原子写入、日志轮转、工作空间命名空间隔离、自动压缩和心跳检测。
 
 | 层级 | 源文件 | 核心结构 | 职责 |
 | --- | --- | --- | --- |
@@ -30,7 +30,7 @@ class StoredSession:
     output_tokens: int
 ```
 
-`session_id` 是会话的唯一标识，`messages` 是消息字符串的元组（用 tuple 而非 list 保证不可变性），`input_tokens` 和 `output_tokens` 分别记录输入和输出的 token 用量。`frozen=True` 让实例创建后不能修改任何字段，类似于 Java 中用 `final` 修饰所有字段 + 无 setter 的 DTO 类。这里没有 `ContentBlock`、`MessageRole` 等结构化概念——消息以原始字符串存储，角色信息被丢弃。
+`session_id` 是会话的唯一标识，`messages` 是消息字符串的元组（用 tuple 而非 list 保证不可变性），`input_tokens` 和 `output_tokens` 分别记录输入和输出的 token 用量。这里没有 `ContentBlock`、`MessageRole` 等结构化概念——消息以原始字符串存储，角色信息被丢弃。
 
 序列化和反序列化通过两个模块级函数完成：
 
@@ -82,7 +82,7 @@ class HistoryLog:
         return '\n'.join(lines)
 ```
 
-`HistoryEvent` 是 frozen dataclass，记录事件的标题和详情。`HistoryLog` 不是 frozen 的——`events` 使用 `field(default_factory=list)` 创建可变默认值，允许动态追加事件。`as_markdown` 将事件列表渲染为 Markdown 无序列表。这个日志纯内存，不持久化，进程退出即丢失。在 Java 中，这相当于一个 `ArrayList<HistoryEvent>` 加一个 `toMarkdown()` 方法，用于调试或展示。
+`HistoryEvent` 是 frozen dataclass，记录事件的标题和详情。`HistoryLog` 不是 frozen 的——`events` 使用 `field(default_factory=list)` 创建可变默认值，允许动态追加事件。`as_markdown` 将事件列表渲染为 Markdown 无序列表。这个日志纯内存，不持久化，进程退出即丢失。
 
 ## 9.2 Rust 端：Session 数据模型
 
@@ -150,7 +150,7 @@ impl PartialEq for Session {
 impl Eq for Session {}
 ```
 
-两个 `Session` 的相等性只看数据内容，不看持久化路径。这意味着同一个会话从不同路径加载后比较仍然相等。在 Java 中，这相当于在 `equals()` 方法中只比较业务字段，排除 `transient` 的文件路径字段。
+两个 `Session` 的相等性只看数据内容，不看持久化路径。这意味着同一个会话从不同路径加载后比较仍然相等。
 
 `SessionPersistence` 是一个简单的内部结构：
 
@@ -206,7 +206,7 @@ pub enum MessageRole {
 }
 ```
 
-`System` 是系统消息（如压缩后的摘要合成消息），`User` 是用户输入，`Assistant` 是模型回复，`Tool` 是工具执行结果。`Clone, Copy` trait 表示这个枚举可以低成本按值复制（它只是一个整数标签）。在 Java 中，这对应 `enum MessageRole { System, User, Assistant, Tool }`。
+`System` 是系统消息（如压缩后的摘要合成消息），`User` 是用户输入，`Assistant` 是模型回复，`Tool` 是工具执行结果。`Clone, Copy` trait 表示这个枚举可以低成本按值复制（它只是一个整数标签）。
 
 `ContentBlock` 枚举了消息可包含的四种内容类型：
 
@@ -223,7 +223,7 @@ pub enum ContentBlock {
 
 `Text` 是普通文本内容。`Thinking` 是链式思维（Chain-of-Thought）的思考块，`signature` 字段存储模型提供思考签名，用于验证思考过程的完整性——某些模型（如 Claude 3.5）会返回加密签名的思考内容，签名用于防止篡改。`ToolUse` 是模型发出的工具调用请求，`id` 是调用标识（用于与 `ToolResult` 配对），`name` 是工具名，`input` 是工具输入参数的 JSON 字符串。`ToolResult` 是工具执行结果，`tool_use_id` 与 `ToolUse` 的 `id` 匹配，`is_error` 标记执行是否失败。
 
-`ToolUse` 和 `ToolResult` 成对出现的约束不在类型系统中强制（Rust 的类型系统无法表达"这个 ToolResult 必须有一个对应的 ToolUse"），而是在运行时通过 Turn Loop 的逻辑保证。`ConversationMessage` 提供了工厂方法简化构造：
+`ToolUse` 和 `ToolResult` 成对出现的约束不在类型系统中强制（Rust 的类型系统无法表达"这个 ToolResult 必须有一个对应的 ToolUse"），而是在运行时通过 Turn Loop 的逻辑保证。
 
 ```rust
 // claw-code/rust/crates/runtime/src/session.rs
@@ -265,7 +265,7 @@ impl ConversationMessage {
 }
 ```
 
-四个工厂方法分别对应四种角色的常见构造场景。`user_text` 创建只含一个 `Text` 块的用户消息。`assistant` 和 `assistant_with_usage` 创建 assistant 消息，后者额外携带 token 统计。`tool_result` 创建只含一个 `ToolResult` 块的工具消息。所有方法都用 `impl Into<String>` 参数，接受 `&str` 或 `String`。在 Java 中，这些对应静态工厂方法 `ConversationMessage.userText("hello")`。
+`user_text` 创建只含一个 `Text` 块的用户消息。`assistant` 和 `assistant_with_usage` 创建 assistant 消息，后者额外携带 token 统计。`tool_result` 创建只含一个 `ToolResult` 块的工具消息。所有方法都用 `impl Into<String>` 参数，接受 `&str` 或 `String`。
 
 ## 9.4 会话 ID 生成与时间戳
 
@@ -281,7 +281,7 @@ fn generate_session_id() -> String {
 }
 ```
 
-`generate_session_id` 用 `current_time_millis()` 获取当前时间戳，用 `SESSION_ID_COUNTER.fetch_add(1, Ordering::Relaxed)` 获取递增计数器，拼成 `session-{millis}-{counter}` 格式。`fetch_add` 是原子操作，返回当前值并加 1，`Ordering::Relaxed` 表示不要求与其他内存操作有特定的顺序关系——这里只需要计数器本身的原子性，不需要与其他变量同步。在 Java 中，这相当于 `AtomicLong.getAndIncrement()`。
+`generate_session_id` 用 `current_time_millis()` 获取当前时间戳，用 `SESSION_ID_COUNTER.fetch_add(1, Ordering::Relaxed)` 获取递增计数器，拼成 `session-{millis}-{counter}` 格式。`fetch_add` 是原子操作，返回当前值并加 1，`Ordering::Relaxed` 表示不要求与其他内存操作有特定的顺序关系——这里只需要计数器本身的原子性，不需要与其他变量同步。
 
 `current_time_millis` 的实现比想象中复杂，因为它需要保证时间戳单调递增：
 
@@ -315,7 +315,7 @@ fn current_time_millis() -> u64 {
 
 这段代码的核心逻辑是：获取系统时钟后，与全局记录的上一个时间戳比较。如果系统时钟没有前进（可能因为时钟回拨或精度不够），就取上一个时间戳加 1。然后通过 `compare_exchange`（CAS 操作）尝试更新全局时间戳：如果全局值仍然是 `previous`（没有被其他线程修改），就更新为 `candidate` 并返回；否则说明其他线程已经更新了全局值，取实际值加 1 重试。
 
-`compare_exchange` 是 Rust 原子类型的 CAS（Compare-And-Swap）操作，接收四个参数：期望值、新值、成功时的内存序、失败时的内存序。`Ordering::SeqCst` 是最强的内存序，保证所有线程看到一致的操作顺序。在 Java 中，这相当于 `AtomicLong.compareAndSet(expected, update)`，但 Rust 的 CAS 需要显式指定内存序。
+`compare_exchange` 是 Rust 原子类型的 CAS（Compare-And-Swap）操作，接收四个参数：期望值、新值、成功时的内存序、失败时的内存序。`Ordering::SeqCst` 是最强的内存序，保证所有线程看到一致的操作顺序。
 
 ## 9.5 JSONL 增量持久化
 
@@ -343,7 +343,7 @@ pub fn push_message(&mut self, message: ConversationMessage) -> Result<(), Sessi
 }
 ```
 
-这段代码实现了"先内存后磁盘，失败回滚"的策略。第 2 行调用 `touch()` 更新 `updated_at_ms`。第 3 行先推入内存。第 4-8 行获取刚推入消息的引用，调用 `append_persisted_message` 写入磁盘。第 9-12 行如果持久化失败，从内存中 `pop()` 回滚——保证内存和磁盘的一致性。这种"先操作内存，再持久化，失败回滚"的模式在 Java 中也很常见，类似于"先修改实体，再 flush，失败抛异常让调用方处理"。
+这段代码实现了"先内存后磁盘，失败回滚"的策略。第 2 行调用 `touch()` 更新 `updated_at_ms`。第 3 行先推入内存。第 4-8 行获取刚推入消息的引用，调用 `append_persisted_message` 写入磁盘。第 9-12 行如果持久化失败，从内存中 `pop()` 回滚——保证内存和磁盘的一致性。
 
 `push_user_text` 是 `push_message` 的快捷方法：
 
@@ -461,7 +461,7 @@ fn write_atomic(path: &Path, contents: &str) -> Result<(), SessionError> {
 }
 ```
 
-这段代码的原子性保证依赖于操作系统的 `rename` 系统调用：在 POSIX 系统上，`rename` 是原子的——要么目标文件被完整替换，要么保持不变。写入过程分三步：第 2-3 行确保父目录存在，第 4 行写入临时文件，第 5 行原子替换目标文件。如果进程在第 4 步和第 5 步之间崩溃，临时文件会残留但目标文件保持完整。在 Java 中，这相当于 `Files.write(tempPath, bytes)` + `Files.move(tempPath, targetPath, StandardCopyOption.ATOMIC_MOVE)`。
+这段代码的原子性保证依赖于操作系统的 `rename` 系统调用：在 POSIX 系统上，`rename` 是原子的——要么目标文件被完整替换，要么保持不变。写入过程分三步：第 2-3 行确保父目录存在，第 4 行写入临时文件，第 5 行原子替换目标文件。如果进程在第 4 步和第 5 步之间崩溃，临时文件会残留但目标文件保持完整。
 
 临时文件的命名也考虑了并发安全：
 
@@ -538,7 +538,7 @@ fn cleanup_rotated_logs(path: &Path) -> Result<(), SessionError> {
 }
 ```
 
-这段代码扫描父目录中所有以 `stem.rot-` 开头的文件，按修改时间排序，删除最旧的文件直到数量不超过 `MAX_ROTATED_FILES`（3 个）。`sort_unstable_by_key` 按 `modified` 时间排序，最旧的在前面被优先删除。在 Java 中，这相当于用 `Files.list(dir)` + `Stream.sorted()` + `Stream.limit()` 实现。
+这段代码扫描父目录中所有以 `stem.rot-` 开头的文件，按修改时间排序，删除最旧的文件直到数量不超过 `MAX_ROTATED_FILES`（3 个）。`sort_unstable_by_key` 按 `modified` 时间排序，最旧的在前面被优先删除。
 
 ## 9.7 双格式加载
 
@@ -621,7 +621,7 @@ fn from_jsonl(contents: &str) -> Result<Self, SessionError> {
 }
 ```
 
-这段代码逐行遍历文件内容，每行解析为一个 JSON 对象，通过 `type` 字段的值分发到四种处理分支。`session_meta` 记录包含会话元数据，`message` 记录包含对话消息，`compaction` 记录包含压缩信息，`prompt_history` 记录包含用户输入历史。每行都有行号错误报告，帮助调试格式问题。在 Java 中，这种按行解析 + type 分发的模式类似于 JSON-RPC 的消息分发，或者数据库 WAL 日志的 replay。
+这段代码逐行遍历文件内容，每行解析为一个 JSON 对象，通过 `type` 字段的值分发到四种处理分支。`session_meta` 记录包含会话元数据，`message` 记录包含对话消息，`compaction` 记录包含压缩信息，`prompt_history` 记录包含用户输入历史。每行都有行号错误报告，帮助调试格式问题。
 
 ## 9.8 会话压缩机制
 
@@ -689,7 +689,7 @@ fn estimate_message_tokens(message: &ConversationMessage) -> usize {
 }
 ```
 
-这个估算基于经验法则：英文文本中 1 个 token 大约等于 4 个字符。对每种 `ContentBlock` 变体，取相关字符串字段的总长度除以 4 再加 1（加 1 防止空字符串返回 0）。这是一个粗略估计——实际 token 数取决于模型分词器，但这个估算足以判断何时需要压缩。在 Java 中，这相当于一个简单的 `String.length() / 4` 启发式，不需要引入完整的分词器。
+这个估算基于经验法则：英文文本中 1 个 token 大约等于 4 个字符。对每种 `ContentBlock` 变体，取相关字符串字段的总长度除以 4 再加 1（加 1 防止空字符串返回 0）。这是一个粗略估计——实际 token 数取决于模型分词器，但这个估算足以判断何时需要压缩。
 
 ## 9.9 压缩执行与边界安全
 
@@ -764,7 +764,7 @@ pub fn compact_session(session: &Session, config: CompactionConfig) -> Compactio
 
 这段代码解决的问题是：如果保留区间的第一条消息是 `ToolResult`（tool 角色消息），但与之配对的 `ToolUse`（assistant 消息中的工具调用块）在被压缩的区间中，会导致 OpenAI 兼容 API 路径返回 400 错误——因为 provider 要求 `tool` 角色消息前面必须有包含 `tool_calls` 的 `assistant` 消息。
 
-循环逻辑：检查保留区间第一条消息是否以 `ToolResult` 开头。如果不是，边界安全，退出循环。如果是，检查前一条消息是否包含 `ToolUse`：如果包含，说明配对完整，向前回溯一步把 assistant 消息也保留，退出循环；如果不包含（已经是孤儿），继续向前回溯尝试修复。在 Java 中，这相当于在截断消息列表前检查并修复 tool-use/tool-result 的配对关系。
+循环逻辑：检查保留区间第一条消息是否以 `ToolResult` 开头。如果不是，边界安全，退出循环。如果是，检查前一条消息是否包含 `ToolUse`：如果包含，说明配对完整，向前回溯一步把 assistant 消息也保留，退出循环；如果不包含（已经是孤儿），继续向前回溯尝试修复。
 
 压缩后的消息列表构建：
 
@@ -905,7 +905,7 @@ pub fn workspace_fingerprint(workspace_root: &Path) -> String {
 }
 ```
 
-FNV-1a 是一个非加密哈希函数，特点是速度快、分布均匀、实现简单。算法：初始值为一个魔法常量，对每个字节先 XOR 到哈希值，再乘以另一个魔法常量。`wrapping_mul` 是环绕乘法，不会在溢出时 panic，而是截断到 u64 范围。最终格式化为 16 位十六进制字符串。在 Java 中，这可以用 `long` 类型手写实现，或使用 Guava 的 `Hashing.fnv1a_64()`。
+FNV-1a 是一个非加密哈希函数，特点是速度快、分布均匀、实现简单。算法：初始值为一个魔法常量，对每个字节先 XOR 到哈希值，再乘以另一个魔法常量。`wrapping_mul` 是环绕乘法，不会在溢出时 panic，而是截断到 u64 范围。最终格式化为 16 位十六进制字符串。
 
 会话引用支持别名解析：
 
@@ -1036,7 +1036,7 @@ pub fn fork(&self, branch_name: Option<String>) -> Self {
 }
 ```
 
-`fork` 复制父会话的全部数据（消息、压缩信息、提示历史等），但生成新的 `session_id` 和时间戳，并设置 `fork` 字段记录父会话 ID 和可选的分支名。`persistence: None` 意味着 fork 出的会话不会自动持久化——需要调用方显式设置持久化路径。在 Java 中，这相当于原型模式（Prototype Pattern）的 `clone()` + 修改部分字段。
+`fork` 复制父会话的全部数据（消息、压缩信息、提示历史等），但生成新的 `session_id` 和时间戳，并设置 `fork` 字段记录父会话 ID 和可选的分支名。`persistence: None` 意味着 fork 出的会话不会自动持久化——需要调用方显式设置持久化路径。
 
 `SessionFork` 的结构：
 
@@ -1104,22 +1104,7 @@ pub fn heartbeat_at(
 
 这个方法用一个 `match` 表达式完成状态判断，逻辑清晰：传输层已死→`TransportDead`；传输层活着且有健康检查记录在时效内→`Healthy`；传输层活着但健康检查超时→`Stalled`；传输层活着但无健康检查记录→`Unknown`。`saturating_sub` 防止时间差下溢。`record_health_check` 方法用于更新 `last_health_check_ms` 时间戳。
 
-## 9.12 设计对比
-
-| claw-code 概念 | Java 生态对应 |
-| --- | --- |
-| `Session` | `HttpSession`（进程内状态载体） |
-| `SessionStore` | `SessionRepository`（按 workspace 隔离） |
-| JSONL 增量追加 | WAL（Write-Ahead Log） |
-| `write_atomic` | 事务日志的原子提交（临时文件 + rename） |
-| 日志轮转 | Log4j 的 `RollingFileAppender` |
-| `Compaction` | 数据库 Checkpoint / 日志压缩 |
-| `workspace_fingerprint` | 多租户场景按 tenant ID 分库分表 |
-| `Session::fork` | 原型模式（Prototype Pattern） |
-| `SessionHeartbeat` | Spring Boot Actuator 的 HealthIndicator |
-| `ConversationRuntime` 持有 `Session` | Stateful Service 持有用户会话状态 |
-
-在 Spring 应用中，`HttpSession` 由容器管理，通常存储在内存或 Redis 中，序列化由容器自动处理。claw-code 的 `Session` 则是进程内结构，持久化到本地 JSONL 文件，手动实现序列化、增量追加和原子写入——更接近嵌入式数据库的 WAL 设计。`SessionStore` 的 workspace fingerprint 隔离，类似于多租户场景下按租户 ID 分库分表的做法。日志轮转机制与 Log4j 的 `RollingFileAppender` 概念相同：按大小触发轮转，保留固定数量的历史文件。
+`SessionStore` 的 workspace fingerprint 隔离，类似于多租户场景下按租户 ID 分库分表的做法。
 
 ## 9.13 本章小结
 

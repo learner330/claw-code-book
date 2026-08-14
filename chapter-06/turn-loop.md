@@ -36,7 +36,7 @@ class QueryEngineConfig:
 
 五个字段控制循环行为。`max_turns` 限制单次会话最大轮数——超过此值循环停止，防止无限对话。`max_budget_tokens` 是 token 预算上限——累计 token 超过此值时停止。`compact_after_turns` 是触发压缩的消息条数阈值——消息超过此值时截断旧消息。`structured_output` 控制输出格式——`True` 时输出 JSON，`False` 时输出纯文本。`structured_retry_limit` 是 JSON 序列化失败时的重试次数。
 
-`@dataclass(frozen=True)` 让配置不可变——创建后不能修改字段值。这保证了配置在运行期间不会被意外篡改。在 Java 中等价于 `public final class QueryEngineConfig` + 所有字段 `final` + 全参构造器。Python 的 `frozen=True` 还会自动生成 `__hash__`，使得配置对象可以作为字典键或集合元素。
+`@dataclass(frozen=True)` 让配置不可变——创建后不能修改字段值。这保证了配置在运行期间不会被意外篡改。Python 的 `frozen=True` 还会自动生成 `__hash__`，使得配置对象可以作为字典键或集合元素。
 
 ### TurnResult：单轮结果快照
 
@@ -58,7 +58,7 @@ class TurnResult:
 
 `stop_reason` 控制循环退出条件，对应三种终止场景：`'completed'`（正常完成）、`'max_turns_reached'`（轮数超限）、`'max_budget_reached'`（token 预算耗尽）。`matched_commands` 和 `matched_tools` 记录本轮匹配到的命令和工具名。`permission_denials` 记录被权限拒绝的工具列表。`usage` 是累计 token 用量。
 
-`tuple` 而非 `list` 用于不可变序列——`TurnResult` 是 frozen 的，其字段也应该是不可变的。在 Java 中等价于用 `List.copyOf(matched_commands)` 创建不可变列表（Java 10+）或 `Collections.unmodifiableList()`。
+`tuple` 而非 `list` 用于不可变序列——`TurnResult` 是 frozen 的，其字段也应该是不可变的。
 
 ### QueryEnginePort：可变状态容器
 
@@ -80,10 +80,6 @@ class QueryEnginePort:
 
 `mutable_messages` 是一个普通 `list`，可以随时裁剪——这是上下文压缩的基础。`transcript_store` 是 `TranscriptStore` 实例，负责记录用户消息的原始序列。`session_id` 用 `uuid4().hex` 自动生成唯一标识。`field(default_factory=...)` 在每次创建实例时调用工厂函数生成新对象——避免了可变默认值的经典陷阱（Python 中 `default=[]` 会让所有实例共享同一个列表）。
 
-在 Java 中，这等价于一个有状态的 Spring `@Component`（scope=prototype），每次注入都创建新实例。`mutable_messages` 是一个 `ArrayList<String>`，`transcript_store` 是一个 `TranscriptStore` Bean。
-
-`from_saved_session` 工厂方法从持久化的会话恢复状态：
-
 ```python
 # claw-code/src/query_engine.py
 
@@ -100,7 +96,7 @@ def from_saved_session(cls, session_id: str) -> 'QueryEnginePort':
     )
 ```
 
-`list(stored.messages)` 创建消息列表的副本——避免修改恢复的消息时影响原始存储。`flushed=True` 表示恢复的 transcript 已经持久化过，不需要再次 flush。在 Java 中这等价于从数据库反序列化一个实体，创建新的 ArrayList 防止修改持久层缓存。
+`list(stored.messages)` 创建消息列表的副本——避免修改恢复的消息时影响原始存储。`flushed=True` 表示恢复的 transcript 已经持久化过，不需要再次 flush。
 
 ### TranscriptStore：消息记录与压缩
 
@@ -129,9 +125,9 @@ class TranscriptStore:
         self.flushed = True
 ```
 
-`compact` 方法是原地截断操作——`self.entries[:] = self.entries[-keep_last:]` 用切片赋值替换列表内容，保留最后 `keep_last` 条消息。`self.entries[:]` 是整个列表的切片视图，赋值会修改原列表而非创建新列表。在 Java 中等价于 `entries.subList(0, size - keepLast).clear()`，但 Python 的切片赋值更简洁。
+`compact` 方法是原地截断操作——`self.entries[:] = self.entries[-keep_last:]` 用切片赋值替换列表内容，保留最后 `keep_last` 条消息。`self.entries[:]` 是整个列表的切片视图，赋值会修改原列表而非创建新列表。
 
-`flushed` 标记表示消息是否已持久化——`append` 时设为 `False`（有新消息未保存），`flush` 时设为 `True`（已保存）。这是一个脏标记（dirty flag）模式，避免不必要的重复持久化。在 Java 中常见于 JPA 实体的 `@Version` 或 Hibernate 的 dirty checking。
+`flushed` 标记表示消息是否已持久化——`append` 时设为 `False`（有新消息未保存），`flush` 时设为 `True`（已保存）。这是一个脏标记（dirty flag）模式，避免不必要的重复持久化。
 
 ## 6.2 Python 端 submit_message 与 Turn Loop
 
@@ -179,7 +175,7 @@ def submit_message(
     output = self._format_output(summary_lines)
 ```
 
-这里不调用真实的 LLM API，而是用字符串拼接模拟模型输出。`summary_lines` 是一个列表，用 `f-string` 格式化每个字段。`*(f'...' for denial in denied_tools)` 用星号解包生成器表达式，把每个权限拒绝的详情展开为列表元素。在 Java 中这等价于 `deniedTools.stream().map(d -> "Permission denial: " + d.getToolName() + ...).collect(Collectors.toList())`，然后 `summaryLines.addAll(...)`。
+这里不调用真实的 LLM API，而是用字符串拼接模拟模型输出。`summary_lines` 是一个列表，用 `f-string` 格式化每个字段。`*(f'...' for denial in denied_tools)` 用星号解包生成器表达式，把每个权限拒绝的详情展开为列表元素。
 
 `_format_output` 根据 `structured_output` 配置决定输出格式：
 
@@ -286,7 +282,7 @@ def stream_submit_message(
 
 Python 的 generator（`yield`）实现了惰性流式输出——调用方每迭代一次，函数执行到下一个 `yield` 暂停。事件按顺序产生：`message_start` → `command_match`（如果有）→ `tool_match`（如果有）→ `permission_denial`（如果有）→ `message_delta`（输出文本）→ `message_stop`（结束）。
 
-在 Java 中，generator 对应 `Stream<Map<String, Object>>` 或 Reactor 的 `Flux<Map<String, Object>>`。Java 的 Stream 是一次性消费的，Python 的 generator 也是一次性消费的。但 Python 的 generator 更轻量——不需要额外的 Stream API 或 Reactor 框架。
+但 Python 的 generator 更轻量——不需要额外的流式处理框架。
 
 事件用 `dict` 表示而非自定义类——这是 Python 端的简化设计。Rust 端用 `AssistantEvent` 枚举替代，类型安全且穷尽匹配。
 
@@ -371,7 +367,7 @@ def _score(tokens: set[str], module: PortingModule) -> int:
     return score
 ```
 
-每个 prompt token 如果出现在模块名、来源路径或职责描述中，就加 1 分。`any(token in haystack for haystack in haystacks)` 在任一 haystack 包含 token 时返回 `True`——`any` 在第一个 `True` 时短路。这是一个基于关键词的路由策略，不涉及向量搜索或语义匹配。在 Java 中等价于遍历 `Set<String> tokens`，对每个 token 检查 `haystack.contains(token)`。
+每个 prompt token 如果出现在模块名、来源路径或职责描述中，就加 1 分。`any(token in haystack for haystack in haystacks)` 在任一 haystack 包含 token 时返回 `True`——`any` 在第一个 `True` 时短路。这是一个基于关键词的路由策略，不涉及向量搜索或语义匹配。
 
 ## 6.3 Rust 端 ConversationRuntime：泛型设计与 trait 约束
 
@@ -449,19 +445,7 @@ pub trait ToolExecutor {
 
 `ApiClient` 只有一个 `stream` 方法——接收 `ApiRequest`，返回 `Vec<AssistantEvent>`（事件列表）。`ToolExecutor` 只有一个 `execute` 方法——接收工具名和输入字符串，返回执行结果字符串。
 
-这两个 trait 非常简洁——各只有一个方法。在 Java 中等价于：
-
-```java
-interface ApiClient {
-    List<AssistantEvent> stream(ApiRequest request) throws RuntimeError;
-}
-
-interface ToolExecutor {
-    String execute(String toolName, String input) throws ToolError;
-}
-```
-
-Java 用接口定义行为契约，Rust 用 trait。差异在于 Rust 的 trait 可以有关联类型和泛型约束，且 trait 的分发可以是静态的（编译期单态化）或动态的（`dyn Trait`）。Java 接口只有动态分发（虚方法调用）。
+这两个 trait 非常简洁——各只有一个方法。
 
 ### ConversationRuntime 结构体
 
@@ -502,7 +486,7 @@ where
 
 泛型设计允许在生产环境注入真实的 HTTP 客户端和工具分发器，在测试环境注入 `ScriptedApiClient` 和 `StaticToolExecutor`。因为 Rust 的泛型是编译期单态化的——每个具体的 `C` 和 `T` 组合会生成一份专门的代码，没有虚函数调用开销。
 
-在 Java 中，这种设计对应依赖注入——通过构造器注入 `ApiClient` 和 `ToolExecutor` 接口的实现。但 Java 的接口调用是动态分发的（JVM 虚方法表查找），有运行时开销。Rust 的泛型在编译期展开，`self.api_client.stream(request)` 直接编译为具体类型的 `stream` 方法调用，零开销。
+Rust 的泛型在编译期展开，`self.api_client.stream(request)` 直接编译为具体类型的 `stream` 方法调用，零开销。
 
 `hook_progress_reporter` 和 `session_tracer` 用 `Option<Box<dyn ...>>`——动态分发。这是因为这两个组件是可选的（`Option`），且类型较复杂（`HookProgressReporter` 有多个方法），用 trait object 比 泛型更灵活。`Box` 把 trait object 放在堆上，`dyn` 表示动态分发。
 
@@ -535,7 +519,7 @@ pub fn run_turn(
     }
 ```
 
-`user_input: impl Into<String>` 是 Rust 的惯用写法——接受任何可以转换为 `String` 的类型（如 `&str`、`String`）。`impl Into<String>` 让调用方可以传 `&str` 或 `String`，不需要显式转换。在 Java 中这对应方法重载（`runTurn(String input)` 和 `runTurn(CharSequence input)`），但 Rust 的 `impl Into` 更通用——一个参数接受多种类型。
+`user_input: impl Into<String>` 是 Rust 的惯用写法——接受任何可以转换为 `String` 的类型（如 `&str`、`String`）。`impl Into<String>` 让调用方可以传 `&str` 或 `String`，不需要显式转换。
 
 `self.session.compaction.is_some()` 检查 session 是否有压缩记录。如果有，说明 session 之前被压缩过（可能因为上下文过长），需要先做健康检查——验证 tool executor 是否正常工作。如果压缩后的 session 状态不一致（如 tool executor 不可用），后续的工具调用会全部失败，不如提前检测。
 
@@ -558,7 +542,7 @@ fn run_session_health_probe(&mut self) -> Result<(), String> {
 
 探针调用 `glob_search` 工具，搜索模式 `"*.health-check-probe-"`——这个模式不会匹配任何文件（文件名不可能以 `-` 结尾且有 `.health-check-probe-` 前缀），是非破坏性操作。如果 tool executor 返回 `Ok`（即使搜索结果为空），说明 executor 正常工作。如果返回 `Err`，说明 executor 不可用，整个 turn 被中止。
 
-`r#"..."#` 是 Rust 的原始字符串字面量——不需要转义引号和反斜杠。在 Java 中等价于 `"{\"pattern\": \"*.health-check-probe-\"}"` 或使用 `Text Block`（Java 15+）`"""..."""`。
+`r#"..."#` 是 Rust 的原始字符串字面量——不需要转义引号和反斜杠。
 
 ### 阶段二：用户消息入队与循环开始
 
@@ -617,7 +601,7 @@ fn run_session_health_probe(&mut self) -> Result<(), String> {
 
 `ApiRequest` 每次迭代都重新构造——`clone()` 复制 system_prompt 和 messages。因为每次迭代后 session 的消息列表可能增长（加入了新的助手消息和工具结果），下次 API 调用需要包含最新消息。`clone()` 是必要的——`api_client.stream()` 可能异步执行或缓存请求，不能让后续修改影响已发出的请求。
 
-`self.api_client.stream(request)` 调用 API 客户端，返回 `Result<Vec<AssistantEvent>, RuntimeError>`。`match` 处理两种情况：`Ok` 时继续处理事件，`Err` 时记录失败并返回错误。在 Java 中等价于 `try { events = apiClient.stream(request); } catch (RuntimeError e) { recordTurnFailed(...); throw e; }`，但 Rust 的 `match` 是表达式，更简洁。
+`self.api_client.stream(request)` 调用 API 客户端，返回 `Result<Vec<AssistantEvent>, RuntimeError>`。`match` 处理两种情况：`Ok` 时继续处理事件，`Err` 时记录失败并返回错误。
 
 流式事件组装为结构化消息：
 
@@ -659,8 +643,6 @@ fn run_session_health_probe(&mut self) -> Result<(), String> {
 
 `filter_map` 是 `filter` + `map` 的组合——对每个 block 做模式匹配，`ToolUse` 变体提取三元组 `(id, name, input)`，其他变体返回 `None` 被过滤掉。这比先 `filter` 再 `map` 更高效——一次遍历完成两个操作。
 
-在 Java 中等价于：
-
 ```java
 List<Tuple3<String, String, String>> pending = assistantMessage.getBlocks().stream()
     .filter(b -> b instanceof ToolUse)
@@ -668,8 +650,6 @@ List<Tuple3<String, String, String>> pending = assistantMessage.getBlocks().stre
     .map(t -> Tuple3.of(t.getId(), t.getName(), t.getInput()))
     .collect(Collectors.toList());
 ```
-
-Rust 的 `filter_map` + `match` 模式匹配比 Java 的 instanceof + 强制转换更安全——编译器保证模式匹配的穷尽性，且 `match` 会绑定字段引用，不需要显式 cast。
 
 ### 阶段四：工具执行循环
 
@@ -829,7 +809,7 @@ Rust 的 `filter_map` + `match` 模式匹配比 Java 的 instanceof + 强制转�
 
 工具结果消息通过 `push_message` 加入 session，同时记录到 `tool_results` 累加器。工具结果加入 session 后，下一轮 API 调用时模型能看到工具执行结果，基于新信息继续推理。
 
-整个工具执行循环用 `for` 遍历 `pending_tool_uses`——一个模型消息中可能包含多个工具调用（并行工具调用），它们被顺序执行。在 Java 中，如果要并行执行，可以用 `CompletableFuture.allOf` 或 `parallelStream`。claw-code 选择顺序执行是因为工具之间可能有依赖（如先 `read_file` 再 `edit_file`），并行执行可能导致竞态条件。
+整个工具执行循环用 `for` 遍历 `pending_tool_uses`——一个模型消息中可能包含多个工具调用（并行工具调用），它们被顺序执行。claw-code 选择顺序执行是因为工具之间可能有依赖（如先 `read_file` 再 `edit_file`），并行执行可能导致竞态条件。
 
 ### 循环退出与结果汇总
 
@@ -946,7 +926,7 @@ fn flush_text_block(text: &mut String, blocks: &mut Vec<ContentBlock>) {
 }
 ```
 
-`std::mem::take(text)` 取走 `text` 的内容（替换为空 `String`），避免了 `text.clone()` 的内存拷贝。这是 Rust 的零拷贝优化——`mem::take` 把字符串的所有权转移到 `ContentBlock::Text` 中，原 `text` 变为空字符串继续使用。在 Java 中没有直接对应——Java 的 `String` 是不可变的，赋值只是引用拷贝，但原变量仍然指向旧字符串。
+`std::mem::take(text)` 取走 `text` 的内容（替换为空 `String`），避免了 `text.clone()` 的内存拷贝。这是 Rust 的零拷贝优化——`mem::take` 把字符串的所有权转移到 `ContentBlock::Text` 中，原 `text` 变为空字符串继续使用。
 
 组装完成后做两个校验：
 
@@ -1024,7 +1004,7 @@ const DEFAULT_AUTO_COMPACTION_INPUT_TOKENS_THRESHOLD: u32 = 100_000;
 const AUTO_COMPACTION_THRESHOLD_ENV_VAR: &str = "CLAUDE_CODE_AUTO_COMPACT_INPUT_TOKENS";
 ```
 
-`100_000` 中的下划线是 Rust 的数字分隔符——提高可读性，等价于 `100000`。在 Java 中也支持类似语法（Java 7+ 的 `100_000`）。
+`100_000` 中的下划线是 Rust 的数字分隔符——提高可读性，等价于 `100000`。
 
 阈值可通过环境变量覆盖。`auto_compaction_threshold_from_env` 读取环境变量并解析：
 
@@ -1048,8 +1028,6 @@ fn parse_auto_compaction_threshold(value: Option<&str>) -> u32 {
 `std::env::var(env_var).ok()` 把 `Result<String, VarError>` 转为 `Option<String>`——环境变量存在时 `Some(value)`，不存在时 `None`。`.as_deref()` 把 `Option<String>` 转为 `Option<&str>`——避免克隆字符串。
 
 `parse_auto_compaction_threshold` 用链式操作解析值。`and_then(|raw| raw.trim().parse::<u32>().ok())` 尝试把字符串解析为 `u32`——解析失败返回 `None`。`filter(|threshold| *threshold > 0)` 过滤掉 0 和负值（`u32` 没有负值，但 0 没有意义）。`unwrap_or(default)` 在所有步骤都失败时回退到默认值。
-
-这种链式 `Option` 操作是 Rust 的函数式风格——等价于 Java 的 `Optional` 链：
 
 ```java
 Optional.ofNullable(envVar)
@@ -1128,7 +1106,7 @@ pub fn estimate_session_tokens(session: &Session) -> usize {
 }
 ```
 
-`estimate_message_tokens` 对每条消息做字符长度估算（通常用 `len() / 4` 作为近似——英文文本约 4 个字符一个 token）。这个估算只用于判断是否触发压缩，不影响实际的 token 计费。在 Java 中等价于 `session.getMessages().stream().mapToInt(Message::estimateTokens).sum()`。
+`estimate_message_tokens` 对每条消息做字符长度估算（通常用 `len() / 4` 作为近似——英文文本约 4 个字符一个 token）。这个估算只用于判断是否触发压缩，不影响实际的 token 计费。
 
 `should_compact` 判断是否需要压缩：
 
@@ -1185,7 +1163,7 @@ pub fn with_session_tracer(mut self, session_tracer: SessionTracer) -> Self {
 }
 ```
 
-Builder 模式——`with_session_tracer` 接受 `mut self`，设置 tracer 后返回 `self`。调用方式：`runtime.with_session_tracer(tracer)`。
+调用方式：`runtime.with_session_tracer(tracer)`。
 
 每个 record 方法都遵循相同的模式——先检查 tracer 是否存在，不存在则直接返回：
 
@@ -1249,8 +1227,6 @@ fn record_tool_finished(&self, iteration: usize, result_message: &ConversationMe
 ```
 
 两层 `let-else` 嵌套——第一层检查 tracer，第二层检查结果消息的第一个 block 是否是 `ToolResult`。`result_message.blocks.first()` 返回 `Option<&ContentBlock>`，`let Some(ContentBlock::ToolResult { tool_name, is_error, .. }) = ...` 同时做 `Option` 解包和 `ContentBlock` 变体匹配。`..` 忽略其他字段（如 `tool_use_id`、`content`）。`*is_error` 解引用 `&bool` 为 `bool`。
-
-在 Java 中这需要两层 instanceof 检查：
 
 ```java
 if (resultMessage.getBlocks().isEmpty()) return;
@@ -1318,8 +1294,6 @@ let executor = StaticToolExecutor::new()
     .register("bash", |input| Ok("command output".to_string()));
 ```
 
-在 Java 中，这等价于一个 `Map<String, Function<String, Result<String, ToolError>>>`，用 `Function` 接口存储 lambda。但 Java 的 `Function` 是 `Function<T, R>`，不支持 `throws`，需要用自定义接口或包装异常。
-
 `execute` 实现用 `get_mut` 获取可变引用——`ok_or_else` 把 `None` 转为 `Err`，`?` 在错误时返回，`Ok` 时解包闭包引用。闭包调用 `(input)` 直接执行——`FnMut` 的调用语法和普通函数一样。
 
 `ScriptedApiClient` 是 `ApiClient` trait 的测试实现，按调用次数返回预设的事件序列：
@@ -1342,29 +1316,11 @@ impl ApiClient for ScriptedApiClient {
 }
 ```
 
-`call_count` 在每次调用时递增，`match` 根据调用次数返回不同的事件序列。这模拟了多轮对话——第一轮模型请求工具，第二轮模型基于工具结果给出最终回答。在 Java 中等价于 Mockito 的 `when(apiClient.stream(any())).thenReturn(events1, events2)`。
+`call_count` 在每次调用时递增，`match` 根据调用次数返回不同的事件序列。这模拟了多轮对话——第一轮模型请求工具，第二轮模型基于工具结果给出最终回答。
 
-## 设计对比
+泛型设计是核心差异。`ConversationRuntime` 通过 trait 约束注入 `ApiClient` 和 `ToolExecutor`，编译期单态化——每个具体的 `(C, T)` 组合生成一份专门代码，`self.api_client.stream(request)` 直接编译为具体类型的 `stream` 调用，没有虚函数开销。只有 `hook_progress_reporter` 和 `session_tracer` 用了 `Box<dyn>` 动态分发，因为它们是可选的且类型复杂。
 
-| claw-code 概念 | Java 生态对应 | 对比说明 |
-| --- | --- | --- |
-| `ConversationRuntime<C, T>` 泛型 + trait 约束 | `DispatcherServlet` + `HandlerMapping` + `HandlerAdapter` | 泛型编译期单态化，接口运行时动态分发 |
-| `ApiClient` / `ToolExecutor` trait | Spring 的 `HttpMessageConverter` / `HandlerAdapter` | trait 零开销，接口有虚方法开销 |
-| `run_turn` 主循环 | `DispatcherServlet.doDispatch` | run_turn 多轮循环，doDispatch 单次请求 |
-| `build_assistant_message` 事件组装 | `HandlerMethodReturnValueHandler` 组装返回值 | 两者都把内部表示转为外部协议格式 |
-| `maybe_auto_compact` 自动压缩 | 无直接对应（Spring 不做 session 压缩） | claw-code 独有，防止上下文溢出 |
-| `SessionTracer` 遥测 | `HandlerInterceptor` 的 afterCompletion 回调 | 两者都记录处理生命周期事件 |
-| `HookRunner` 前置/后置钩子 | `HandlerInterceptor` 的 preHandle/postHandle | 机制一致，claw-code 的钩子可修改输入和覆盖权限 |
-| `PermissionPolicy` 权限检查 | Spring Security 的 `FilterSecurityInterceptor` | 两者都在执行前做权限判定 |
-| `StaticToolExecutor` + `ScriptedApiClient` | Mockito mock + when/thenReturn | 两者都用于测试，Mockito 更通用 |
-| `TranscriptStore.compact` 原地截断 | `ArrayList.subList().clear()` | 两者都是原地修改列表 |
-| Python generator 流式事件 | `Stream<Event>` / `Flux<Event>` | generator 轻量，Stream/Flux 功能更丰富 |
-
-`ConversationRuntime` 的 `run_turn` 与 Spring MVC 的 `DispatcherServlet.doDispatch` 在结构上相似——都是"接收请求 → 调用处理器 → 处理结果 → 返回"的流程。但运行模式有本质区别：`DispatcherServlet` 处理一次请求就返回（无状态），`run_turn` 会循环多次直到模型不再请求工具（有状态，消息在轮次间累积）。这更接近 Spring 的 SSE 持续推送模式。
-
-泛型设计是核心差异。Spring 的 `DispatcherServlet` 通过接口注入组件（`HandlerMapping`、`HandlerAdapter`），运行时动态分发。`ConversationRuntime` 通过 trait 约束注入 `ApiClient` 和 `ToolExecutor`，编译期单态化——每个具体的 `(C, T)` 组合生成一份专门代码，`self.api_client.stream(request)` 直接编译为具体类型的 `stream` 调用，没有虚函数开销。只有 `hook_progress_reporter` 和 `session_tracer` 用了 `Box<dyn>` 动态分发，因为它们是可选的且类型复杂。
-
-自动压缩是 claw-code 独有的设计。Spring 的 HTTP 请求处理不涉及上下文压缩——每个请求独立，不需要管理对话历史。但 Agent 系统的对话历史会持续增长，最终超过模型上下文窗口。`maybe_auto_compact` 在每次迭代后检查 token 阈值，触发 `compact_session` 把旧消息压缩为摘要，保留最近 4 条消息。这个机制确保 Agent 可以处理任意长度的对话，不会因为上下文溢出而崩溃。
+自动压缩是 claw-code 独有的设计。但 Agent 系统的对话历史会持续增长，最终超过模型上下文窗口。`maybe_auto_compact` 在每次迭代后检查 token 阈值，触发 `compact_session` 把旧消息压缩为摘要，保留最近 4 条消息。这个机制确保 Agent 可以处理任意长度的对话，不会因为上下文溢出而崩溃。
 
 ## 小结
 

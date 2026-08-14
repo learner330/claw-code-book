@@ -2,7 +2,7 @@
 
 ## 本章概览
 
-claw-code 的可扩展性来自两层：插件系统（通过 `plugin.json` 声明钩子、工具和命令）和 60 余个内置 slash 命令（`/commit`、`/pr`、`/plugins` 等）。Python 重写版将这两层做成镜像注册表占位，记录原版模块的元数据但不实现逻辑；Rust 重写版则真正落地了插件管理器（`PluginManager`）与命令分发（`SlashCommand` 枚举 + 解析器）。对于 Java 工程师来说，Rust 的插件系统类似于 OSGi 或 SPI 机制——插件通过清单文件声明能力，框架负责发现、加载和生命周期管理；命令分发则类似于 Spring MVC 的 `DispatcherServlet` 路由——输入字符串解析出命令名，匹配到对应的枚举变体后执行。
+claw-code 的可扩展性来自两层：插件系统（通过 `plugin.json` 声明钩子、工具和命令）和 60 余个内置 slash 命令（`/commit`、`/pr`、`/plugins` 等）。Python 重写版将这两层做成镜像注册表占位，记录原版模块的元数据但不实现逻辑；Rust 重写版则真正落地了插件管理器（`PluginManager`）与命令分发（`SlashCommand` 枚举 + 解析器）。
 
 本章按三层展开：Python 端的镜像占位和移植审计、Rust 端的插件管理器与清单契约、Rust 端的命令分发与插件命令集成。
 
@@ -77,7 +77,7 @@ def load_command_snapshot() -> tuple[PortingModule, ...]:
 PORTED_COMMANDS = load_command_snapshot()
 ```
 
-这段代码用 `lru_cache(maxsize=1)` 缓存加载结果——整个进程只读一次 JSON 文件，后续调用直接返回缓存的 tuple。`PortingModule` 是 frozen dataclass，四个字段：`name`（命令名）、`responsibility`（职责描述）、`source_hint`（原版源文件路径）、`status='mirrored'`（标记为镜像而非实现）。`tuple()` 保证返回不可变序列。在 Java 中，这相当于一个 `final class PortingModule` 加 `List.copyOf()` 返回不可变列表，`lru_cache` 对应 `Supplier.memoize()`。
+这段代码用 `lru_cache(maxsize=1)` 缓存加载结果——整个进程只读一次 JSON 文件，后续调用直接返回缓存的 tuple。`PortingModule` 是 frozen dataclass，四个字段：`name`（命令名）、`responsibility`（职责描述）、`source_hint`（原版源文件路径）、`status='mirrored'`（标记为镜像而非实现）。`tuple()` 保证返回不可变序列。
 
 `execute_command` 揭示了镜像的本质——找到命令但不执行：
 
@@ -115,7 +115,7 @@ def get_command(name: str) -> PortingModule | None:
     return None
 ```
 
-`COMMAND_ALIASES` 把 `plugins` 和 `marketplace` 都归一化到 `plugin`，说明命令命名历史上发生过变更。`get_command` 先 strip + lower 规范化输入，再查别名表，最后线性查找。`.get(normalized, normalized)` 的第二个参数是默认值——如果别名表中没有匹配，返回原始规范化值。在 Java 中，这相当于 `Map.getOrDefault(key, key)`。
+`COMMAND_ALIASES` 把 `plugins` 和 `marketplace` 都归一化到 `plugin`，说明命令命名历史上发生过变更。`get_command` 先 strip + lower 规范化输入，再查别名表，最后线性查找。`.get(normalized, normalized)` 的第二个参数是默认值——如果别名表中没有匹配，返回原始规范化值。
 
 `src/command_graph.py` 在镜像之上做了一层分类：
 
@@ -152,7 +152,7 @@ pub enum PluginKind {
 }
 ```
 
-三个变体对应三个来源：`Builtin` 是编译期内置的插件，代码直接链接进二进制；`Bundled` 是随发行包分发的插件，位于固定的 bundled 目录；`External` 是用户通过 `/plugins install` 安装的第三方插件。`#[serde(rename_all = "lowercase")]` 让序列化输出使用小写（`builtin`、`bundled`、`external`）。在 Java 中，这对应三种类加载方式：内置类（bootstrap classpath）、依赖 JAR（应用 classpath）、外部加载的 JAR（自定义 ClassLoader）。
+三个变体对应三个来源：`Builtin` 是编译期内置的插件，代码直接链接进二进制；`Bundled` 是随发行包分发的插件，位于固定的 bundled 目录；`External` 是用户通过 `/plugins install` 安装的第三方插件。`#[serde(rename_all = "lowercase")]` 让序列化输出使用小写（`builtin`、`bundled`、`external`）。
 
 每个 `PluginKind` 对应一个 marketplace 常量：
 
@@ -200,7 +200,7 @@ pub struct PluginManifest {
 }
 ```
 
-逐字段分析：`name`、`version`、`description` 是基础元数据。`permissions` 是插件级别的权限声明（read/write/execute）。`default_enabled` 控制插件安装后是否默认启用，`#[serde(rename = "defaultEnabled", default)]` 让 JSON 中的 PascalCase 键映射到 Rust 的 snake_case 字段，缺失时默认为 `false`。`hooks` 是第 8 章详解的 `PluginHooks` 结构。`lifecycle` 包含 Init 和 Shutdown 命令。`tools` 是插件声明的工具列表。`commands` 是插件声明的 slash 命令列表。在 Java 中，这相当于一个插件描述符接口（如 OSGi 的 `Bundle-Manifest`），用注解或 XML 声明插件的能力和需求。
+逐字段分析：`name`、`version`、`description` 是基础元数据。`permissions` 是插件级别的权限声明（read/write/execute）。`default_enabled` 控制插件安装后是否默认启用，`#[serde(rename = "defaultEnabled", default)]` 让 JSON 中的 PascalCase 键映射到 Rust 的 snake_case 字段，缺失时默认为 `false`。`hooks` 是第 8 章详解的 `PluginHooks` 结构。`lifecycle` 包含 Init 和 Shutdown 命令。`tools` 是插件声明的工具列表。`commands` 是插件声明的 slash 命令列表。
 
 插件权限和工具权限是两套独立的枚举：
 
@@ -224,7 +224,7 @@ pub enum PluginToolPermission {
 }
 ```
 
-`PluginPermission` 是插件级别的粗粒度权限（read/write/execute），用 `lowercase` 序列化。`PluginToolPermission` 是工具级别的细粒度权限，复用了第 7 章权限系统的三档模型（read-only/workspace-write/danger-full-access），用 `kebab-case` 序列化。两套权限枚举独立存在——一个插件可以有 `read` 权限但它的某个工具可能需要 `danger-full-access`。`PartialOrd, Ord` trait 让权限级别可以比较大小，用于权限继承检查。在 Java 中，这相当于两套独立的 `enum`，配合 `Comparable` 接口。
+`PluginPermission` 是插件级别的粗粒度权限（read/write/execute），用 `lowercase` 序列化。`PluginToolPermission` 是工具级别的细粒度权限，复用了第 7 章权限系统的三档模型（read-only/workspace-write/danger-full-access），用 `kebab-case` 序列化。两套权限枚举独立存在——一个插件可以有 `read` 权限但它的某个工具可能需要 `danger-full-access`。`PartialOrd, Ord` trait 让权限级别可以比较大小，用于权限继承检查。
 
 `PluginToolManifest` 定义了插件工具的声明：
 
@@ -244,7 +244,7 @@ pub struct PluginToolManifest {
 }
 ```
 
-每个工具声明包含：`name`（工具名）、`description`（描述）、`input_schema`（JSON Schema 格式的输入定义）、`command`（执行的 shell 命令）、`args`（命令参数）、`required_permission`（所需权限）。`input_schema` 用 `serde_json::Value` 类型而非强类型结构——因为 JSON Schema 本身是动态的，不同的工具有不同的字段结构。在 Java 中，这相当于 `JsonObject` 或 `Map<String, Object>`。
+每个工具声明包含：`name`（工具名）、`description`（描述）、`input_schema`（JSON Schema 格式的输入定义）、`command`（执行的 shell 命令）、`args`（命令参数）、`required_permission`（所需权限）。`input_schema` 用 `serde_json::Value` 类型而非强类型结构——因为 JSON Schema 本身是动态的，不同的工具有不同的字段结构。
 
 `PluginLifecycle` 管理插件的初始化和清理：
 
@@ -260,7 +260,7 @@ pub struct PluginLifecycle {
 }
 ```
 
-`init` 和 `shutdown` 都是 shell 命令字符串数组。Init 命令在插件加载时执行（如启动后台服务、初始化数据库），Shutdown 命令在插件卸载时执行（如清理临时文件、关闭连接）。这与 Java 的 `@PostConstruct` 和 `@PreDestroy` 注解语义相同——生命周期回调在特定时机自动触发。
+`init` 和 `shutdown` 都是 shell 命令字符串数组。Init 命令在插件加载时执行（如启动后台服务、初始化数据库），Shutdown 命令在插件卸载时执行（如清理临时文件、关闭连接）。
 
 `PluginCommandManifest` 定义了插件声明的 slash 命令：
 
@@ -317,7 +317,7 @@ pub fn execute(&self, input: &Value) -> Result<String, PluginError> {
 
 这段代码展示了插件工具的子进程执行模型。`Command::new(&self.command)` 创建进程构建器，`args` 设置命令行参数，三个 `Stdio::piped()` 将 stdin/stdout/stderr 配置为管道。四个 `CLAWD_*` 环境变量传递插件身份和工具输入。如果有插件根目录，设置工作目录和 `CLAWD_PLUGIN_ROOT` 环境变量。
 
-输入通过两种渠道传递：环境变量 `CLAWD_TOOL_INPUT`（适合简单脚本用 `$CLAWD_TOOL_INPUT` 读取）和 stdin（适合 Python/Node 脚本用 `json.load(sys.stdin)` 读取）。`spawn()` 启动子进程，`write_all` 写入 stdin，`wait_with_output()` 等待完成并收集输出。成功时返回 stdout（trim 后），失败时把 stderr 拼进错误信息。在 Java 中，这等价于 `ProcessBuilder` + `Process.waitFor()` + `InputStream` 读取。
+输入通过两种渠道传递：环境变量 `CLAWD_TOOL_INPUT`（适合简单脚本用 `$CLAWD_TOOL_INPUT` 读取）和 stdin（适合 Python/Node 脚本用 `json.load(sys.stdin)` 读取）。`spawn()` 启动子进程，`write_all` 写入 stdin，`wait_with_output()` 等待完成并收集输出。成功时返回 stdout（trim 后），失败时把 stderr 拼进错误信息。
 
 ## 11.4 Rust 插件系统：PluginManager 生命周期
 
@@ -353,7 +353,7 @@ pub fn install(&mut self, source: &str) -> Result<InstallOutcome, PluginError> {
 }
 ```
 
-这段代码的执行步骤：`parse_install_source` 判断来源类型（Git URL 或本地路径），`materialize_source` 对 Git URL 执行 `git clone --depth 1` 到临时目录，对本地路径直接返回原路径。`load_plugin_from_directory` 解析 `plugin.json` 清单。`plugin_id` 拼接为 `name@external`，`sanitize_plugin_id` 清洗路径分隔符。如果安装目录已存在则先删除（覆盖安装），然后复制文件。Git 克隆的临时目录被清理，本地路径来源保留原目录。最后写入 `installed.json` 注册表和 `settings.json` 启用状态。在 Java 中，这相当于 Maven 的 `install` 目标——下载依赖、解析 POM、复制到本地仓库、更新索引。
+这段代码的执行步骤：`parse_install_source` 判断来源类型（Git URL 或本地路径），`materialize_source` 对 Git URL 执行 `git clone --depth 1` 到临时目录，对本地路径直接返回原路径。`load_plugin_from_directory` 解析 `plugin.json` 清单。`plugin_id` 拼接为 `name@external`，`sanitize_plugin_id` 清洗路径分隔符。如果安装目录已存在则先删除（覆盖安装），然后复制文件。Git 克隆的临时目录被清理，本地路径来源保留原目录。最后写入 `installed.json` 注册表和 `settings.json` 启用状态。
 
 插件 ID 的拼接与清洗：
 
@@ -372,7 +372,7 @@ fn sanitize_plugin_id(plugin_id: &str) -> String {
 }
 ```
 
-`plugin_id` 用 `@` 分隔名称和 marketplace。`sanitize_plugin_id` 把路径分隔符（`/`、`\`）、`@`、`:` 替换为 `-`，防止 ID 被用来构造文件路径时越界（如 `../../etc/passwd@external` 会被清洗为 `....-etc-passwd-external`）。这是一个安全措施——插件名来自外部输入（Git URL 或用户输入），必须经过清洗后才能用作文件系统路径。在 Java 中，这相当于 `String.replaceAll("[/\\\\@:]", "-")`。
+`plugin_id` 用 `@` 分隔名称和 marketplace。`sanitize_plugin_id` 把路径分隔符（`/`、`\`）、`@`、`:` 替换为 `-`，防止 ID 被用来构造文件路径时越界（如 `../../etc/passwd@external` 会被清洗为 `....-etc-passwd-external`）。这是一个安全措施——插件名来自外部输入（Git URL 或用户输入），必须经过清洗后才能用作文件系统路径。
 
 清单加载不是直接反序列化，中间插入了兼容性检测：
 
@@ -391,7 +391,7 @@ fn load_manifest_from_path(root: &Path, manifest_path: &Path) -> Result<PluginMa
 }
 ```
 
-这段代码分两步解析：先用 `serde_json::from_str` 解析为通用的 `Value`（JSON AST），调用 `detect_claude_code_manifest_contract_gaps` 检查原版 Claude Code 插件契约中不被 claw 支持的特性。如果检测到不兼容字段，返回 `ManifestValidation` 错误。通过检测后再用 `from_value` 反序列化为 `RawPluginManifest`，最后用 `build_plugin_manifest` 构建强类型的 `PluginManifest`。这种"先检测后解析"的两步模式在 Java 中不常见——Java 通常直接用 Jackson 反序列化并在 `@JsonIgnoreProperties(ignoreUnknown = false)` 时报错。但 claw 需要更精细的控制：不是拒绝所有未知字段，而是只拒绝特定的三个字段。
+这段代码分两步解析：先用 `serde_json::from_str` 解析为通用的 `Value`（JSON AST），调用 `detect_claude_code_manifest_contract_gaps` 检查原版 Claude Code 插件契约中不被 claw 支持的特性。如果检测到不兼容字段，返回 `ManifestValidation` 错误。通过检测后再用 `from_value` 反序列化为 `RawPluginManifest`，最后用 `build_plugin_manifest` 构建强类型的 `PluginManifest`。但 claw 需要更精细的控制：不是拒绝所有未知字段，而是只拒绝特定的三个字段。
 
 被拒绝的三个字段是 `skills`、`mcpServers`、`agents`。原版 Claude Code 允许插件清单直接携带这三类资源，claw 的契约有意收窄：插件只负责 hooks、lifecycle、tools、commands 四类扩展，技能从本地目录发现，MCP 服务器从配置加载，Agent 目录也不由插件管理。这是一个刻意的设计取舍，避免插件成为绕过其他子系统边界的隐式入口。
 
@@ -402,7 +402,7 @@ fn load_manifest_from_path(root: &Path, manifest_path: &Path) -> Result<PluginMa
 // PluginKind::Bundled 的记录不允许卸载，只能禁用
 ```
 
-`PluginKind::Bundled` 的插件随发行包分发，不允许卸载——如果用户执行 `/plugins uninstall bundled-plugin`，会收到错误提示。但捆绑插件可以被禁用（`disable`），只是不能从磁盘删除。这把"随发行包分发的插件"与"用户自己安装的插件"区分开——前者由发行方管理生命周期，后者由用户管理。在 Java 中，这类似于 JAR 分类的区分：`BOOT-INF/lib` 下的依赖不能在运行时移除，但可以通过配置排除。
+`PluginKind::Bundled` 的插件随发行包分发，不允许卸载——如果用户执行 `/plugins uninstall bundled-plugin`，会收到错误提示。但捆绑插件可以被禁用（`disable`），只是不能从磁盘删除。这把"随发行包分发的插件"与"用户自己安装的插件"区分开——前者由发行方管理生命周期，后者由用户管理。
 
 ## 11.5 Rust 插件系统：聚合与去重
 
@@ -432,7 +432,7 @@ pub fn aggregated_tools(&self) -> Result<Vec<PluginTool>, PluginError> {
 }
 ```
 
-这段代码遍历所有已启用的插件，收集它们的工具并检测名称冲突。`seen_names` 是 `BTreeMap<String, String>`，键是工具名，值是定义该工具的插件 ID。`insert` 方法在键已存在时返回旧值 `Some(existing_plugin)`——检测到冲突时立即返回错误，错误消息明确指出两个冲突的插件 ID。在 Java 中，这相当于 `Map.putIfAbsent` 返回 `null` 或旧值来检测冲突，类似于 Spring 的 `BeanDefinitionStoreException`——两个 Bean 定义同名时报错。
+这段代码遍历所有已启用的插件，收集它们的工具并检测名称冲突。`seen_names` 是 `BTreeMap<String, String>`，键是工具名，值是定义该工具的插件 ID。`insert` 方法在键已存在时返回旧值 `Some(existing_plugin)`——检测到冲突时立即返回错误，错误消息明确指出两个冲突的插件 ID。
 
 `PluginHooks::merged_with` 在第 8 章已展示，这里补充 `PluginLifecycle` 的聚合语义——Init 和 Shutdown 命令也按插件注册顺序拼接，与 hooks 的合并方式相同。
 
@@ -466,7 +466,7 @@ pub enum SlashCommand {
 }
 ```
 
-每个变体对应一个 `/` 开头的内置命令。无参命令是单元变体（`Help`、`Status`、`Commit`），带一个可选参数的用 `Option<String>`（`Model { model }`），带两个参数的用 `action` 加 `target` 成对字段（`Plugins`、`Mcp`），`Clear` 用 `bool` 参数表示是否确认。`Unknown(String)` 是兜底变体——无法识别的命令保留原始输入字符串。在 Java 中，这种用枚举 + 字段承载参数的设计不常见（Java 枚举变体不能有不同字段结构），更接近的对应是 sealed class + record 的组合，或者 Command 模式的 `Map<String, CommandHandler>`。
+每个变体对应一个 `/` 开头的内置命令。无参命令是单元变体（`Help`、`Status`、`Commit`），带一个可选参数的用 `Option<String>`（`Model { model }`），带两个参数的用 `action` 加 `target` 成对字段（`Plugins`、`Mcp`），`Clear` 用 `bool` 参数表示是否确认。`Unknown(String)` 是兜底变体——无法识别的命令保留原始输入字符串。
 
 解析入口 `validate_slash_command_input`：
 
@@ -501,7 +501,7 @@ pub fn validate_slash_command_input(input: &str) -> Result<Option<SlashCommand>,
 
 这段代码的解析逻辑：第 3-4 行检查输入是否以 `/` 开头，不是则返回 `Ok(None)` 表示这不是命令。第 6-7 行去掉 `/` 后按空白分词，取第一个词作为命令名。第 8-11 行检查命令名是否为空（用户只输入了 `/`）。第 13-14 行收集剩余参数和命令名之后的完整文本。第 16-21 行的 `match` 根据命令名分发到对应的枚举变体，每个分支调用对应的参数校验函数。
 
-三个辅助函数统一收口参数校验：`validate_no_args` 拒绝多余参数（如 `/help extra` 报错），`optional_single_arg` 读至多一个参数（如 `/model gpt-4` 或 `/model`），`require_remainder` 强制要求命令名之后的剩余文本（如 `/commit` 后面必须有提交信息）。这套函数把 60 多个命令的参数校验收敛到同一种模式，避免每个命令各自写一遍参数处理。在 Java 中，这相当于 `@RequestParam` / `@PathVariable` 注解的参数绑定机制。
+三个辅助函数统一收口参数校验：`validate_no_args` 拒绝多余参数（如 `/help extra` 报错），`optional_single_arg` 读至多一个参数（如 `/model gpt-4` 或 `/model`），`require_remainder` 强制要求命令名之后的剩余文本（如 `/commit` 后面必须有提交信息）。这套函数把 60 多个命令的参数校验收敛到同一种模式，避免每个命令各自写一遍参数处理。
 
 ## 11.7 Rust 命令分发：元数据表与插件命令集成
 
@@ -521,7 +521,7 @@ const SLASH_COMMAND_SPECS: &[SlashCommandSpec] = &[
 ];
 ```
 
-每个 `SlashCommandSpec` 记录：`name`（规范名）、`aliases`（别名数组）、`summary`（一句话描述）、`argument_hint`（参数提示，用于 help 输出）、`resume_supported`（是否支持在 resume 模式下使用）。这张表与 `SlashCommand` 枚举分离——枚举用于解析和执行，元数据表用于展示和模糊匹配。在 Java 中，这相当于 Spring MVC 中 `@RequestMapping` 注解元数据与 `HandlerMethod` 执行体的分离——注解描述路由信息，方法体执行逻辑。
+每个 `SlashCommandSpec` 记录：`name`（规范名）、`aliases`（别名数组）、`summary`（一句话描述）、`argument_hint`（参数提示，用于 help 输出）、`resume_supported`（是否支持在 resume 模式下使用）。这张表与 `SlashCommand` 枚举分离——枚举用于解析和执行，元数据表用于展示和模糊匹配。
 
 `/plugins` 命令把命令层和插件层连接起来：
 
@@ -560,7 +560,7 @@ pub fn handle_plugins_slash_command(
 }
 ```
 
-这段代码的 `match` 按 action 分发：`list`（或无 action）只读查看，支持按 target 过滤；`install` 安装新插件；`enable`/`disable` 修改启用状态。关键差异在 `reload_runtime` 字段——`list` 返回 `false`（只读操作，不需要重载运行时），`install`/`enable`/`disable` 返回 `true`（修改了插件集合，需要重载运行时让新配置生效）。调用方根据这个标志决定是否触发运行时重建。在 Java 中，这相当于 Spring 的 `refresh()` ——修改了 Bean 定义后需要刷新 ApplicationContext。
+这段代码的 `match` 按 action 分发：`list`（或无 action）只读查看，支持按 target 过滤；`install` 安装新插件；`enable`/`disable` 修改启用状态。关键差异在 `reload_runtime` 字段——`list` 返回 `false`（只读操作，不需要重载运行时），`install`/`enable`/`disable` 返回 `true`（修改了插件集合，需要重载运行时让新配置生效）。调用方根据这个标志决定是否触发运行时重建。
 
 技能命令的分发使用 `SkillSlashDispatch` 枚举：
 
@@ -588,32 +588,11 @@ pub struct CommandManifestEntry {
 pub enum CommandSource { Builtin, InternalOnly, FeatureGated }
 ```
 
-`Builtin` 是默认可见的内置命令，`InternalOnly` 是不对外暴露的内部命令（如调试命令），`FeatureGated` 是受特性开关控制的命令。这个三级分类比 Python 侧靠字符串关键字猜测的分类更精确——它把"命令从哪来、谁可见"变成编译期类型信息。在 Java 中，这相当于用注解（`@PublicApi`、`@Internal`、`@FeatureGated`）标记命令的可见性。
+`Builtin` 是默认可见的内置命令，`InternalOnly` 是不对外暴露的内部命令（如调试命令），`FeatureGated` 是受特性开关控制的命令。这个三级分类比 Python 侧靠字符串关键字猜测的分类更精确——它把"命令从哪来、谁可见"变成编译期类型信息。
 
-## 11.8 设计对比
+二者都不共享内存，失败隔离靠进程边界——一个插件工具崩溃不会影响主进程。
 
-| claw-code 概念 | Java 生态对应 |
-| --- | --- |
-| `PluginManifest` | OSGi Bundle-Manifest / plugin.xml |
-| `PluginKind` 三类来源 | 内置类 / 依赖 JAR / 外部 ClassLoader |
-| `PluginTool::execute` 子进程 | `ProcessBuilder` / `Runtime.exec` |
-| `plugin.json` 清单 | `MANIFEST.MF` / `plugin.xml` |
-| `PluginManager::install` | Maven install 目标 |
-| `sanitize_plugin_id` | `String.replaceAll` 路径清洗 |
-| `detect_claude_code_manifest_contract_gaps` | Schema 校验器（负向拒绝） |
-| `aggregated_tools` 去重 | Bean 名冲突检测 |
-| `SlashCommand` 枚举 | `DispatcherServlet` 路由到 Controller |
-| `SLASH_COMMAND_SPECS` | `@RequestMapping` 注解元数据 |
-| `handle_plugins_slash_command` | Controller 方法调用 Service 层 |
-| `reload_runtime` 标志 | Spring `refresh()` 触发条件 |
-| `CommandSource` 三级分类 | `@PublicApi` / `@Internal` / `@FeatureGated` |
-| `SkillSlashDispatch` | 命令模式 + 转发 |
-
-插件系统在 Java 生态里最接近的对应物不是 Spring IoC，而是进程外扩展。Spring 的 Bean 在同一个 JVM 内由容器管理生命周期，而 claw 的插件工具是独立子进程，通过环境变量和 stdin/stdout 通信。二者都不共享内存，失败隔离靠进程边界——一个插件工具崩溃不会影响主进程。区别只是 claw 用 `plugin.json` 声明了子进程的契约，Java 侧通常靠约定。
-
-命令分发的对应物是 Spring MVC 的路由。`validate_slash_command_input` 等价于 `DispatcherServlet` 根据 URL 找到 `@RequestMapping` 处理器：输入字符串解析出命令名，匹配到对应的 `SlashCommand` 变体。`SLASH_COMMAND_SPECS` 表类似 Controller 上的注解元数据，`help` 命令遍历它生成帮助文本，等价于反射扫描 `@RequestMapping` 生成 API 文档。
-
-一处 Java 没有直接对应物的是 `detect_claude_code_manifest_contract_gaps`。它在反序列化之前拦截清单字段，主动拒绝 `skills`、`mcpServers`、`agents` 三类扩展。这类似一个严格的 schema 校验器，但拒绝的动机不是格式错误，而是能力边界——插件不应该成为加载其他资源的隐式入口。Java 生态里更接近的实践是 SPI 的 service 声明，但 SPI 通常只做正向发现，不做负向拒绝。
+`detect_claude_code_manifest_contract_gaps` 的设计值得注意。它在反序列化之前拦截清单字段，主动拒绝 `skills`、`mcpServers`、`agents` 三类扩展。这类似一个严格的 schema 校验器，但拒绝的动机不是格式错误，而是能力边界——插件不应该成为加载其他资源的隐式入口。
 
 ## 11.9 本章小结
 

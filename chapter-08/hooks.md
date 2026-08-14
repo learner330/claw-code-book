@@ -1,8 +1,8 @@
-# 第8章 钩子系统：AOP 思想在 Agent 中的应用
+# 第8章 钩子系统：Agent 工具调用的生命周期扩展
 
 ## 本章概览
 
-钩子（Hook）是 claw-code 扩展机制的核心。它允许用户在不修改 Agent 核心循环代码的前提下，在工具调用的生命周期节点上插入自定义脚本，实现拦截、审批、改写输入、追加反馈等能力。从 Java 工程师的视角看，钩子本质上就是 AOP（面向切面编程）——`PreToolUse` 相当于 `@Before`，`PostToolUse` 相当于 `@AfterReturning`，`PostToolUseFailure` 相当于 `@AfterThrowing`。
+钩子（Hook）是 claw-code 扩展机制的核心。它允许用户在不修改 Agent 核心循环代码的前提下，在工具调用的生命周期节点上插入自定义脚本，实现拦截、审批、改写输入、追加反馈等能力。
 
 claw-code 的钩子系统分三层：Python 端的归档层只保留元数据快照，不做任何运行时工作；插件层（`rust/crates/plugins`）聚合多个插件声明的钩子命令并执行；运行时层（`rust/crates/runtime`）在 Turn Loop 中按配置触发钩子，解析结构化 JSON 输出，支持工具匹配器、中止信号、权限覆盖和输入改写。本章按照"归档层 → 插件层 → 运行时层 → Turn Loop 集成"的顺序逐层展开。
 
@@ -19,7 +19,7 @@ claw-code 的钩子系统分三层：Python 端的归档层只保留元数据快
 
 Python 包的 `src/hooks/` 目录里只有一个占位文件，它不包含任何逻辑，而是从元数据快照里读取归档信息。这种模式在 claw-code 的 Python 端反复出现——对于原版 TypeScript 前端模块，Python 端选择归档而非移植，因为它们与 Agent 核心循环无关。
 
-下面这段代码展示了归档占位模块的标准写法。`load_archive_metadata` 从 JSON 快照文件读取元数据，然后模块级别把这些值导出为常量。对于 Java 工程师来说，这相当于一个只读的 DTO 类，字段全部由外部 JSON 配置注入，`frozen=True` 的 dataclass 或 `final` 修饰的不可变类是更接近的类比：
+下面这段代码展示了归档占位模块的标准写法。`load_archive_metadata` 从 JSON 快照文件读取元数据，然后模块级别把这些值导出为常量。
 
 ```python
 # claw-code/src/hooks/__init__.py
@@ -59,7 +59,7 @@ PORTING_NOTE = f"Python package placeholder for '{ARCHIVE_NAME}' with {MODULE_CO
 }
 ```
 
-这个 JSON 文件的结构与上面的 Python 代码一一对应。`module_count` 为 104，说明原版 TypeScript 项目中有 104 个与 hooks 相关的模块。`sample_files` 列出了 7 个代表性文件，从文件名可以看出它们几乎都是 `useXxx` 命名的 React 自定义钩子（`useRateLimitWarningNotification`、`useModelMigrationNotifications`、`useAfterFirstRender`）和工具权限处理组件（`PermissionContext`、`coordinatorHandler`、`interactiveHandler`）。这些模块属于原版 Claw Code 的 IDE 前端界面层，负责渲染"限流警告""模型迁移提示""权限确认弹窗"等 UI 状态，与 Agent 的核心推理循环无关，因此被归档而非移植。
+这个 JSON 文件的结构与上面的 Python 代码一一对应。`module_count` 为 104，说明原版 TypeScript 项目中有 104 个与 hooks 相关的模块。这些模块属于原版 Claw Code 的 IDE 前端界面层，负责渲染"限流警告""模型迁移提示""权限确认弹窗"等 UI 状态，与 Agent 的核心推理循环无关，因此被归档而非移植。
 
 ## 8.2 插件层：PluginHooks 的声明与聚合
 
@@ -83,7 +83,7 @@ pub struct PluginHooks {
 
 这段代码定义了插件钩子的数据结构。三个字段 `pre_tool_use`、`post_tool_use`、`post_tool_use_failure` 都是 `Vec<String>`，对应三个触发时机：工具执行前、工具执行后（成功）、工具执行后（失败）。每个元素是一个 shell 命令字符串或相对脚本路径。
 
-关键设计在 `#[serde(rename = "PreToolUse", default)]` 这个属性：Rust 的命名惯例是 snake_case（`pre_tool_use`），但 `plugin.json` 里的键是 PascalCase（`PreToolUse`），serde 的 `rename` 属性让反序列化时自动匹配 PascalCase 键名。`default` 属性意味着如果 JSON 中缺少某个键，该字段使用 `Default::default()`（即空 `Vec`）而不是报错。这等价于 Java 中 Jackson 的 `@JsonProperty("PreToolUse")` + `@JsonSetter(nulls = Nulls.SKIP)` 组合。
+关键设计在 `#[serde(rename = "PreToolUse", default)]` 这个属性：Rust 的命名惯例是 snake_case（`pre_tool_use`），但 `plugin.json` 里的键是 PascalCase（`PreToolUse`），serde 的 `rename` 属性让反序列化时自动匹配 PascalCase 键名。`default` 属性意味着如果 JSON 中缺少某个键，该字段使用 `Default::default()`（即空 `Vec`）而不是报错。
 
 仓库里的示例插件演示了完整的清单格式：
 
@@ -140,7 +140,7 @@ pub fn aggregated_hooks(&self) -> Result<PluginHooks, PluginError> {
 }
 ```
 
-这段代码遍历所有已启用的插件，将它们的钩子合并到一个 `PluginHooks` 中。`try_fold` 是 Rust 迭代器的带错误传播的折叠操作，等价于 Java 的 `stream().reduce()` 但支持 `Result` 类型的短路。初始值是 `PluginHooks::default()`（三个空数组），每次迭代先调用 `plugin.validate()` 校验插件（包括钩子脚本路径是否存在），然后调用 `merged_with` 合并。`merged_with` 按触发时机分别拼接三个 `Vec`，因此同一个 PreToolUse 时机下，插件 A 和插件 B 的钩子会按插件注册顺序依次执行，类似于责任链模式。
+这段代码遍历所有已启用的插件，将它们的钩子合并到一个 `PluginHooks` 中。初始值是 `PluginHooks::default()`（三个空数组），每次迭代先调用 `plugin.validate()` 校验插件（包括钩子脚本路径是否存在），然后调用 `merged_with` 合并。
 
 ## 8.3 插件层 HookRunner：命令执行与退出码协议
 
@@ -159,7 +159,7 @@ pub enum HookEvent {
 }
 ```
 
-`HookEvent` 是一个 C 风格枚举，三个变体分别对应工具执行前、执行后（成功）、执行后（失败）。`Clone, Copy` trait 表示这个枚举可以低成本复制（它就是一个整数标签），类似于 Java 的 `enum`——Java 枚举天然是单例且可比较的。`as_str()` 方法返回每个变体对应的字符串表示（`"PreToolUse"` 等），用于环境变量传递和日志输出。
+`HookEvent` 是一个 C 风格枚举，三个变体分别对应工具执行前、执行后（成功）、执行后（失败）。`as_str()` 方法返回每个变体对应的字符串表示（`"PreToolUse"` 等），用于环境变量传递和日志输出。
 
 钩子执行结果用 `HookRunResult` 表达：
 
@@ -196,7 +196,7 @@ impl HookRunner {
 }
 ```
 
-`HookRunner` 只持有一个 `PluginHooks` 字段。`from_registry` 是工厂方法，从 `PluginRegistry` 聚合钩子后创建实例。`Default` trait 的实现让没有钩子时也能创建一个空运行的 runner。这对应 Java 中的 Builder 模式或工厂方法模式——`from_registry` 是工厂方法，`new` 是直接构造。
+`HookRunner` 只持有一个 `PluginHooks` 字段。`Default` trait 的实现让没有钩子时也能创建一个空运行的 runner。
 
 三个入口方法分别对应三个触发时机：
 
@@ -238,7 +238,7 @@ pub fn run_post_tool_use_failure(
 }
 ```
 
-这三个方法的签名差异反映了每个时机的语义差异。`run_pre_tool_use` 没有 `tool_output` 参数（工具还没执行，没有输出），`is_error` 固定为 `false`。`run_post_tool_use` 接收 `tool_output` 和 `is_error`——后者允许在成功调用后标记非错误结果。`run_post_tool_use_failure` 接收 `tool_error` 而非 `tool_output`，`is_error` 固定为 `true`。在 Java 中，这通常会用方法重载实现，但 Rust 没有方法重载，所以用不同方法名区分。
+这三个方法的签名差异反映了每个时机的语义差异。`run_pre_tool_use` 没有 `tool_output` 参数（工具还没执行，没有输出），`is_error` 固定为 `false`。`run_post_tool_use` 接收 `tool_output` 和 `is_error`——后者允许在成功调用后标记非错误结果。`run_post_tool_use_failure` 接收 `tool_error` 而非 `tool_output`，`is_error` 固定为 `true`。
 
 `run_commands` 是核心执行循环：
 
@@ -282,7 +282,7 @@ fn run_commands(
 }
 ```
 
-这段代码是插件层钩子执行的核心循环。第 2 行先检查命令列表是否为空，空则直接返回 `allow`。第 5 行生成 JSON payload，这个 payload 会通过 stdin 传给钩子脚本。第 8-18 行遍历每条命令执行，`match` 分支处理三种结果：`Allow` 时收集消息继续下一条，`Deny` 时收集消息后立即短路返回（设置 `denied: true`），`Failed` 时同样短路返回（设置 `failed: true`）。短路语义意味着第一个 Deny 或 Failed 的钩子会阻止后续钩子执行，类似于 Java 中 `&&` 运算符的短路行为。
+这段代码是插件层钩子执行的核心循环。第 2 行先检查命令列表是否为空，空则直接返回 `allow`。第 5 行生成 JSON payload，这个 payload 会通过 stdin 传给钩子脚本。第 8-18 行遍历每条命令执行，`match` 分支处理三种结果：`Allow` 时收集消息继续下一条，`Deny` 时收集消息后立即短路返回（设置 `denied: true`），`Failed` 时同样短路返回（设置 `failed: true`）。短路语义意味着第一个 Deny 或 Failed 的钩子会阻止后续钩子执行。
 
 `run_command` 是单条命令的执行器。执行前通过环境变量向钩子脚本传递上下文：
 
@@ -341,7 +341,7 @@ fn parse_tool_input(tool_input: &str) -> serde_json::Value {
 }
 ```
 
-`hook_payload` 根据 `HookEvent` 分两种格式：`PostToolUseFailure` 使用 `tool_error` 字段名（语义上更准确），其他事件使用 `tool_output`。`parse_tool_input` 尝试把 `tool_input` 字符串解析成 JSON 对象，失败时退化为 `{"raw": tool_input}`。同时保留 `tool_input_json` 原始字符串，让钩子脚本可以根据自身能力选择解析后的结构或原始字符串。这种"双格式"设计在 Java 中不常见，因为 Java 通常用强类型 DTO 统一表示，但 shell 脚本和轻量脚本的灵活性要求使得同时提供两种格式更实用。
+`hook_payload` 根据 `HookEvent` 分两种格式：`PostToolUseFailure` 使用 `tool_error` 字段名（语义上更准确），其他事件使用 `tool_output`。`parse_tool_input` 尝试把 `tool_input` 字符串解析成 JSON 对象，失败时退化为 `{"raw": tool_input}`。同时保留 `tool_input_json` 原始字符串，让钩子脚本可以根据自身能力选择解析后的结构或原始字符串。
 
 退出码是钩子与主程序之间的核心协议。`run_command` 按固定规则解释退出码：
 
@@ -474,7 +474,7 @@ pub struct RuntimeInvalidHookConfig {
 }
 ```
 
-每个字段的作用：`event` 是触发时机名称（如 `"PreToolUse"`），`index` 和 `hook_index` 是配置项在数组中的位置（用于错误定位），`kind` 是错误类型分类，`error_field` 标明具体哪个字段有问题。这些信息最终会以友好的方式呈现给用户，帮助他们修正配置。在 Java 中，这相当于一个校验错误 DTO，配合 `Validator` 模式使用。
+每个字段的作用：`event` 是触发时机名称（如 `"PreToolUse"`），`index` 和 `hook_index` 是配置项在数组中的位置（用于错误定位），`kind` 是错误类型分类，`error_field` 标明具体哪个字段有问题。这些信息最终会以友好的方式呈现给用户，帮助他们修正配置。
 
 ## 8.5 运行时层：HookRunner 的数据结构
 
@@ -498,7 +498,7 @@ pub enum HookProgressEvent {
 }
 ```
 
-`HookProgressEvent` 是新增的结构，插件层没有。它的三个变体分别表示钩子命令的开始、完成和取消。这是一个观察者模式的实现——`HookProgressReporter` trait 定义了接收这些事件的接口：
+`HookProgressEvent` 是新增的结构，插件层没有。它的三个变体分别表示钩子命令的开始、完成和取消。
 
 ```rust
 // claw-code/rust/crates/runtime/src/hooks.rs
@@ -508,7 +508,7 @@ pub trait HookProgressReporter: Send {
 }
 ```
 
-`Send` trait 约束要求实现者可以安全地在线程间转移所有权。在 Java 中，这相当于一个回调接口（`interface HookProgressReporter { void onEvent(HookProgressEvent event); }`），`Send` 约束类似于声明该实现是线程安全的。运行时层在前端需要展示钩子执行进度时，传入一个实现了此 trait 的 reporter，每条钩子命令的 Started/Completed/Cancelled 事件都会被上报。
+`Send` trait 约束要求实现者可以安全地在线程间转移所有权。运行时层在前端需要展示钩子执行进度时，传入一个实现了此 trait 的 reporter，每条钩子命令的 Started/Completed/Cancelled 事件都会被上报。
 
 中止信号是运行时层的另一个关键能力：
 
@@ -534,7 +534,7 @@ impl HookAbortSignal {
 }
 ```
 
-`HookAbortSignal` 包装了一个 `Arc<AtomicBool>`。`Arc`（Atomic Reference Counted）是 Rust 的线程安全引用计数指针，允许多个所有者共享同一个布尔值。`abort()` 用 `Ordering::Release` 写入 `true`，`is_aborted()` 用 `Ordering::Acquire` 读取。`Release/Acquire` 内存序保证了写入对其他线程立即可见——这对跨线程的中止信号至关重要。在 Java 中，这等价于 `volatile boolean aborted` 或 `AtomicBoolean`，但 Rust 的 `Arc` 还保证了引用计数的线程安全。
+`HookAbortSignal` 包装了一个 `Arc<AtomicBool>`。`Arc`（Atomic Reference Counted）是 Rust 的线程安全引用计数指针，允许多个所有者共享同一个布尔值。`abort()` 用 `Ordering::Release` 写入 `true`，`is_aborted()` 用 `Ordering::Acquire` 读取。`Release/Acquire` 内存序保证了写入对其他线程立即可见——这对跨线程的中止信号至关重要。
 
 钩子执行结果 `HookRunResult` 也比插件层更丰富：
 
@@ -552,7 +552,7 @@ pub struct HookRunResult {
 }
 ```
 
-新增了三个字段：`cancelled` 标记钩子被中止信号取消；`permission_override` 携带钩子返回的权限覆盖指令（Allow/Deny/Ask），可以短路权限系统的正常评估流程；`updated_input` 携带钩子改写后的工具输入，让钩子能在工具执行前修改参数。`allow()` 是一个工厂方法，创建一个所有字段都是默认值的结果：
+新增了三个字段：`cancelled` 标记钩子被中止信号取消；`permission_override` 携带钩子返回的权限覆盖指令（Allow/Deny/Ask），可以短路权限系统的正常评估流程；`updated_input` 携带钩子改写后的工具输入，让钩子能在工具执行前修改参数。
 
 ```rust
 // claw-code/rust/crates/runtime/src/hooks.rs
@@ -608,7 +608,7 @@ impl HookRunner {
 }
 ```
 
-`from_feature_config` 从运行时特性配置中提取钩子配置。`RuntimeFeatureConfig` 是整个运行时的配置聚合体，`hooks()` 方法返回 `&RuntimeHookConfig` 的引用，`clone()` 复制一份后传给 `new()`。在 Java 中这相当于 `new HookRunner(config.getHooks())`。
+`from_feature_config` 从运行时特性配置中提取钩子配置。`RuntimeFeatureConfig` 是整个运行时的配置聚合体，`hooks()` 方法返回 `&RuntimeHookConfig` 的引用，`clone()` 复制一份后传给 `new()`。
 
 ## 8.6 运行时层：run_commands 执行循环
 
@@ -723,7 +723,7 @@ fn merge_parsed_hook_output(target: &mut HookRunResult, parsed: ParsedHookOutput
 }
 ```
 
-消息列表是追加的（`extend`），但 `permission_override`、`permission_reason`、`updated_input` 是覆盖的——后执行的钩子可以覆盖先执行钩子的覆盖指令。这意味着如果插件 A 的 PreToolUse 钩子返回 `Allow`，插件 B 的 PreToolUse 钩子返回 `Deny`，最终结果是 `Deny`。这个设计符合"最后说话的钩子优先"的语义，类似于责任链中后置处理器的优先级更高。
+消息列表是追加的（`extend`），但 `permission_override`、`permission_reason`、`updated_input` 是覆盖的——后执行的钩子可以覆盖先执行钩子的覆盖指令。这意味着如果插件 A 的 PreToolUse 钩子返回 `Allow`，插件 B 的 PreToolUse 钩子返回 `Deny`，最终结果是 `Deny`。
 
 ## 8.7 运行时层：run_command 与退出码增强
 
@@ -877,7 +877,7 @@ enum CommandExecution {
 
 这段代码是整个中止机制的核心。第 5 行调用 `spawn()` 启动子进程。第 6-8 行通过 stdin 写入 JSON payload。第 10-20 行是一个轮询循环：每 20 毫秒检查一次中止信号，如果被触发就 `kill()` 子进程并返回 `Cancelled`；否则用 `try_wait()` 非阻塞地检查子进程是否结束，结束了就收集输出返回 `Finished`，没结束就 sleep 20ms 继续轮询。
 
-`try_wait()` 是 Rust 标准库提供的非阻塞等待方法，它不会挂起当前线程，而是立即返回 `Option<ExitStatus>`：`Some` 表示子进程已退出，`None` 表示仍在运行。这与 Java 的 `Process.waitFor(timeout, unit)` 类似，但 Rust 的实现是手动轮询而非基于事件通知。
+`try_wait()` 是 Rust 标准库提供的非阻塞等待方法，它不会挂起当前线程，而是立即返回 `Option<ExitStatus>`：`Some` 表示子进程已退出，`None` 表示仍在运行。
 
 20 毫秒的轮询间隔是一个权衡：太短会浪费 CPU 周期，太长会增加中止延迟。在实际使用中，钩子脚本通常很快（几百毫秒内完成），20ms 的延迟对用户体验几乎无感知。
 
@@ -898,7 +898,7 @@ impl CommandWithStdin {
 }
 ```
 
-每个方法都返回 `&mut Self`，实现了流式 API。这与 Java Builder 模式的效果相同——`builder.stdin(piped).stdout(piped).stderr(piped).env("KEY", "value")`。Rust 的 `&mut Self` 返回类型比 Java 的 Builder 更轻量，因为不需要创建新对象，而是在原对象上修改后返回可变引用。
+每个方法都返回 `&mut Self`，实现了流式 API。
 
 运行时层的 `shell_command` 与插件层有一个细微差异：
 
@@ -1047,7 +1047,7 @@ if root.get("continue").and_then(Value::as_bool) == Some(false)
 }
 ```
 
-这段代码从 JSON 根对象中提取三个顶层字段。`systemMessage` 和 `reason` 都是消息字符串，会被追加到 `parsed.messages`。拒绝信号有两种表达方式：`"continue": false` 或 `"decision": "block"`——前者是布尔标志，后者是字符串枚举。支持两种格式是为了兼容不同的钩子脚本风格。`and_then(Value::as_str)` 是 Rust `Option` 的链式调用，等价于 Java 的 `Optional.map(...).filter(...)`。
+这段代码从 JSON 根对象中提取三个顶层字段。`systemMessage` 和 `reason` 都是消息字符串，会被追加到 `parsed.messages`。拒绝信号有两种表达方式：`"continue": false` 或 `"decision": "block"`——前者是布尔标志，后者是字符串枚举。支持两种格式是为了兼容不同的钩子脚本风格。
 
 更高级的字段从 `hookSpecificOutput` 子对象中提取：
 
@@ -1075,7 +1075,7 @@ if let Some(Value::Object(specific)) = root.get("hookSpecificOutput") {
 }
 ```
 
-`hookSpecificOutput` 是一个嵌套对象，包含钩子特有的结构化指令。`additionalContext` 是额外上下文消息，会被追加到消息列表——这允许钩子在不拒绝工具的情况下追加上下文信息（如"此操作已被审计日志记录"）。`permissionDecision` 映射到 `PermissionOverride` 枚举的三个变体。`permissionDecisionReason` 是权限覆盖的原因说明。`updatedInput` 是改写后的工具输入，钩子可以修改工具的执行参数——这是一个非常强大的能力，类似于 Java AOP 中 `@Around` 通知的 `ProceedingJoinPoint.proceed(modifiedArgs)`。
+`hookSpecificOutput` 是一个嵌套对象，包含钩子特有的结构化指令。`additionalContext` 是额外上下文消息，会被追加到消息列表——这允许钩子在不拒绝工具的情况下追加上下文信息（如"此操作已被审计日志记录"）。`permissionDecision` 映射到 `PermissionOverride` 枚举的三个变体。`permissionDecisionReason` 是权限覆盖的原因说明。
 
 如果消息列表最终为空，用原始 stdout 填充：
 
@@ -1180,27 +1180,9 @@ fn bounded_hook_preview(value: &str) -> Option<String> {
 }
 ```
 
-`bounded_hook_preview` 逐字符遍历输入，到 160 字符时截断并添加省略号 `…`。控制字符（换行、回车、制表符等）被转义为字面量表示（`\n`、`\r`、`\t`），其他控制字符用 Unicode 转义（`\u{xx}`）。这保证了错误消息是单行文本，不会被多行 stdout 破坏格式。在 Java 中，类似的功能通常用 `String.substring(0, Math.min(s.length(), 160))` + `StringEscapeUtils.escapeJava()` 实现。
-
-## 8.11 插件层与运行时层的设计对比
-
-| 维度 | 插件层 HookRunner | 运行时层 HookRunner |
-| --- | --- | --- |
-| 配置来源 | `PluginHooks`（插件清单聚合） | `RuntimeHookConfig`（配置文件） |
-| 命令类型 | `Vec<String>`（纯命令字符串） | `Vec<RuntimeHookCommand>`（命令 + matcher） |
-| 工具过滤 | 无（所有钩子对所有工具生效） | 有（`matches_tool` 按匹配器过滤） |
-| 中止信号 | 无 | `HookAbortSignal`（`Arc<AtomicBool>` 轮询） |
-| 进度报告 | 无 | `HookProgressReporter` trait |
-| stdout 解析 | 原样作为消息 | JSON 结构化解析 |
-| 权限覆盖 | 不支持 | `PermissionOverride`（Allow/Deny/Ask） |
-| 输入改写 | 不支持 | `updated_input` |
-| 取消状态 | 不支持 | `cancelled` 字段 |
-| 退出码 0 拒绝 | 不支持（0 一定是 Allow） | 支持（检查 `parsed.deny`） |
-| shell 启动 | 文件路径检测 + `sh -lc` | 统一 `sh -lc` |
+`bounded_hook_preview` 逐字符遍历输入，到 160 字符时截断并添加省略号 `…`。控制字符（换行、回车、制表符等）被转义为字面量表示（`\n`、`\r`、`\t`），其他控制字符用 Unicode 转义（`\u{xx}`）。这保证了错误消息是单行文本，不会被多行 stdout 破坏格式。
 
 这张对比表揭示了两个层次的设计分工。插件层是轻量级的钩子执行器，关注"执行插件声明的命令并收集退出码"。运行时层是全功能的钩子引擎，额外支持工具匹配器过滤、可取消执行、进度上报、结构化 JSON 输出解析、权限覆盖和输入改写。两者共享相同的退出码协议（0/2/其他/信号终止）和相同的 payload 格式，确保钩子脚本可以在两个层次间无缝复用。
-
-从 Java 架构视角看，这种分层类似于 Spring AOP 的两级设计：`Advisor`（切面声明，对应插件层的 `PluginHooks`）定义"在什么时机执行什么"，而 `MethodInterceptor`（拦截器实现，对应运行时层的 `HookRunner`）负责实际的执行控制，包括异常处理、超时控制和返回值修改。
 
 ## 8.12 本章小结
 

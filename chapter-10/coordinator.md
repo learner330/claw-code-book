@@ -4,7 +4,7 @@
 
 当单个 Agent 面对大规模重构或跨模块分析任务时，上下文窗口容易耗尽，且无法并行探索不同代码路径。claw-code 的解决方案是协调器模式（Coordinator Mode）：一个主 Agent 拆解任务，多个 Worker Agent 并行执行，最后汇总结果。Python 重写版保留了原版协调器的存档元数据和移植审计基础设施，Rust 生产版则实现了完整的 Lane（工作流分支）生命周期管理：`TaskRegistry` 管理子 Agent 任务的状态机，`PolicyEngine` 根据 Lane 上下文评估规则并输出决策动作，`LaneEvent` 系统记录 Lane 生命周期中的 20 余种事件，`WorkerBoot` 状态机管理 Worker 启动阶段的多级信任门控。
 
-本章从 Python 端的存档审计开始，逐步过渡到 Rust 端的 Lane 编排系统。对于 Java 工程师来说，`TaskRegistry` 相当于 `ThreadPoolExecutor` + `FutureTask` 的组合，`PolicyEngine` 相当于 Drools 规则引擎，`LaneEvent` 相当于领域事件的 EventBus，而 `WorkerBoot` 的多级状态机则类似于 Spring Security 的过滤器链。
+本章从 Python 端的存档审计开始，逐步过渡到 Rust 端的 Lane 编排系统。
 
 | 层级 | 源文件 | 核心结构 | 职责 |
 | --- | --- | --- | --- |
@@ -35,7 +35,7 @@ PORTING_NOTE = f"Python placeholder package for '{ARCHIVE_NAME}' with {MODULE_CO
 __all__ = ["ARCHIVE_NAME", "MODULE_COUNT", "PORTING_NOTE", "SAMPLE_FILES"]
 ```
 
-这段代码与第 8 章的 hooks 归档占位符结构完全一致。`load_archive_metadata` 从 `reference_data/subsystems/coordinator.json` 读取快照，Python 模块把这些值导出为常量。`__all__` 列表显式声明了模块的公开 API，限制 `from coordinator import *` 的导入范围。在 Java 中，这相当于一个只包含 `final static` 常量的工具类。
+这段代码与第 8 章的 hooks 归档占位符结构完全一致。`load_archive_metadata` 从 `reference_data/subsystems/coordinator.json` 读取快照，Python 模块把这些值导出为常量。`__all__` 列表显式声明了模块的公开 API，限制 `from coordinator import *` 的导入范围。
 
 存档元数据记录了原版协调器的规模：
 
@@ -138,7 +138,7 @@ class ExecutionRegistry:
         return None
 ```
 
-`ExecutionRegistry` 是 frozen dataclass，持有命令和工具的镜像元组。`command()` 和 `tool()` 方法做大小写不敏感的线性查找。`MirroredCommand` 和 `MirroredTool` 是镜像条目，记录原版模块的名称、职责描述和源文件路径，但不包含实际执行逻辑。在 Java 中，这相当于一个 `ServiceLocator` 模式的实现——按名称查找服务描述，但不执行服务。
+`ExecutionRegistry` 是 frozen dataclass，持有命令和工具的镜像元组。`command()` 和 `tool()` 方法做大小写不敏感的线性查找。`MirroredCommand` 和 `MirroredTool` 是镜像条目，记录原版模块的名称、职责描述和源文件路径，但不包含实际执行逻辑。
 
 `execute_command` 的实现揭示了这个镜像系统的本质：
 
@@ -178,7 +178,7 @@ pub enum TaskStatus {
 }
 ```
 
-`Created` 是初始状态，任务已创建但尚未开始执行。`Running` 表示子 Agent 正在工作。`Blocked` 表示任务被阻塞（如等待信任门控通过）。`Completed`、`Failed`、`Stopped` 是三种终态：正常完成、执行失败、被外部停止。`#[serde(rename_all = "snake_case")]` 让序列化输出使用 snake_case（`created`、`running`），与 JSON API 的命名惯例一致。在 Java 中，这对应 `enum TaskStatus { Created, Running, Blocked, Completed, Failed, Stopped }`，状态转换逻辑类似于 `FutureTask.State`。
+`Created` 是初始状态，任务已创建但尚未开始执行。`Running` 表示子 Agent 正在工作。`Blocked` 表示任务被阻塞（如等待信任门控通过）。`Completed`、`Failed`、`Stopped` 是三种终态：正常完成、执行失败、被外部停止。`#[serde(rename_all = "snake_case")]` 让序列化输出使用 snake_case（`created`、`running`），与 JSON API 的命名惯例一致。
 
 `Task` 结构携带任务的完整上下文：
 
@@ -220,7 +220,7 @@ struct RegistryInner {
 }
 ```
 
-`Arc<Mutex<RegistryInner>>` 是 Rust 中实现线程安全共享状态的标准模式：`Arc` 提供多所有者的引用计数，`Mutex` 提供互斥访问。`RegistryInner` 是私有内部结构，包含任务哈希表和递增计数器。`Clone` trait 的自动派生让 `TaskRegistry` 可以被廉价克隆——克隆的只是 `Arc` 的引用计数，内部数据共享。在 Java 中，这相当于一个线程安全的 `ConcurrentHashMap`，但 Rust 的 `Mutex` 是全量锁定而非分段锁定。
+`Arc<Mutex<RegistryInner>>` 是 Rust 中实现线程安全共享状态的标准模式：`Arc` 提供多所有者的引用计数，`Mutex` 提供互斥访问。`RegistryInner` 是私有内部结构，包含任务哈希表和递增计数器。`Clone` trait 的自动派生让 `TaskRegistry` 可以被廉价克隆——克隆的只是 `Arc` 的引用计数，内部数据共享。
 
 任务创建方法：
 
@@ -303,7 +303,7 @@ pub fn stop(&self, task_id: &str) -> Result<Task, String> {
 }
 ```
 
-这段代码的核心逻辑是终态保护：如果任务已经处于 `Completed`、`Failed` 或 `Stopped` 三种终态之一，拒绝重复停止并返回错误。只有非终态的任务才能被停止。`get_mut` 返回 `Option<&mut Task>`，`ok_or_else` 将 `None` 转为 `Err`。在 Java 中，这相当于在 `stop()` 方法中先检查状态再执行，类似于 `Future.cancel(true)` 对已完成任务的拒绝行为。
+这段代码的核心逻辑是终态保护：如果任务已经处于 `Completed`、`Failed` 或 `Stopped` 三种终态之一，拒绝重复停止并返回错误。只有非终态的任务才能被停止。`get_mut` 返回 `Option<&mut Task>`，`ok_or_else` 将 `None` 转为 `Err`。
 
 ## 10.4 Lane Board：任务看板
 
@@ -331,7 +331,7 @@ pub struct LaneBoard {
 }
 ```
 
-`LaneBoard` 将任务分成三列：`active`（Created + Running）、`blocked`（Blocked）、`finished`（Completed + Failed + Stopped）。每条 `LaneBoardEntry` 携带任务的摘要信息和实时新鲜度。`generated_at` 记录看板生成时间。在 Java 中，这相当于 Kanban 风格的任务看板，三列对应"进行中""阻塞""已完成"。
+`LaneBoard` 将任务分成三列：`active`（Created + Running）、`blocked`（Blocked）、`finished`（Completed + Failed + Stopped）。每条 `LaneBoardEntry` 携带任务的摘要信息和实时新鲜度。`generated_at` 记录看板生成时间。
 
 看板生成逻辑：
 
@@ -447,7 +447,7 @@ pub enum PolicyCondition {
 }
 ```
 
-`And` 和 `Or` 支持条件组合，形成布尔表达式树。其余变体是原子条件：`GreenAt` 检查 CI 绿灯级别是否达标，`StaleBranch` 检查分支是否过期（超过 1 小时阈值），`StartupBlocked` 检查启动阶段是否被阻塞，`LaneCompleted` 检查 Lane 是否已完成，`ReviewPassed` 检查代码审查是否通过，`ScopedDiff` 检查 diff 是否在范围内，`TimedOut` 检查是否超时，`RetryAvailable` 检查重试次数是否用尽，`RebaseRequired` 检查是否需要 rebase，`ApprovalTokenPresent`/`ApprovalTokenMissing` 检查审批令牌。在 Java 中，这相当于 Drools 规则引擎的 `when` 条件部分。
+`And` 和 `Or` 支持条件组合，形成布尔表达式树。其余变体是原子条件：`GreenAt` 检查 CI 绿灯级别是否达标，`StaleBranch` 检查分支是否过期（超过 1 小时阈值），`StartupBlocked` 检查启动阶段是否被阻塞，`LaneCompleted` 检查 Lane 是否已完成，`ReviewPassed` 检查代码审查是否通过，`ScopedDiff` 检查 diff 是否在范围内，`TimedOut` 检查是否超时，`RetryAvailable` 检查重试次数是否用尽，`RebaseRequired` 检查是否需要 rebase，`ApprovalTokenPresent`/`ApprovalTokenMissing` 检查审批令牌。
 
 条件匹配的实现：
 
@@ -509,7 +509,7 @@ pub enum PolicyAction {
 }
 ```
 
-这些动作覆盖了 Lane 生命周期的所有阶段：`MergeToDev`/`MergeForward` 合并代码，`Retry`/`Rebase`/`RecoverOnce` 处理失败恢复，`Escalate` 上报问题，`CloseoutLane` 关闭 Lane，`CleanupSession`/`CleanupStale` 清理资源，`Reconcile` 调和无须操作的情况，`Notify` 发送通知，`RequireApprovalToken` 要求审批，`Block` 阻塞操作。`Chain` 支持动作的链式组合——一条规则匹配后可以触发多个动作。在 Java 中，这相当于工作流引擎的 `then` 动作部分，`Chain` 类似于 `CompositeAction`。
+这些动作覆盖了 Lane 生命周期的所有阶段：`MergeToDev`/`MergeForward` 合并代码，`Retry`/`Rebase`/`RecoverOnce` 处理失败恢复，`Escalate` 上报问题，`CloseoutLane` 关闭 Lane，`CleanupSession`/`CleanupStale` 清理资源，`Reconcile` 调和无须操作的情况，`Notify` 发送通知，`RequireApprovalToken` 要求审批，`Block` 阻塞操作。`Chain` 支持动作的链式组合——一条规则匹配后可以触发多个动作。
 
 `Chain` 的扁平化：
 
@@ -530,7 +530,7 @@ impl PolicyAction {
 }
 ```
 
-`flatten_into` 递归展开嵌套的 `Chain`，把所有非 `Chain` 动作平铺到一个 `Vec` 中。例如 `Chain([Retry, Chain([Notify, Block])])` 会被展开为 `[Retry, Notify, Block]`。这是组合模式的经典实现——将树形结构展开为线性列表。
+`flatten_into` 递归展开嵌套的 `Chain`，把所有非 `Chain` 动作平铺到一个 `Vec` 中。例如 `Chain([Retry, Chain([Notify, Block])])` 会被展开为 `[Retry, Notify, Block]`。
 
 `PolicyEngine` 的评估逻辑：
 
@@ -594,8 +594,6 @@ pub struct LaneContext {
 
 逐字段分析：`lane_id` 是 Lane 唯一标识。`green_level` 是 CI 绿灯级别（0-255 的 u8），`green_contract_satisfied` 表示是否满足绿灯契约。`branch_freshness` 记录分支新鲜度（距离上次更新的时间间隔）。`blocker` 标识阻塞类型（None/Startup/External）。`review_status` 是代码审查状态（Pending/Approved/Rejected）。`diff_scope` 是 diff 范围（Full/Scoped）。`completed` 和 `reconciled` 分别标记 Lane 是否完成和是否已调合。`retry_count` 和 `retry_limit` 记录重试状态。`rebase_required` 和 `stale_cleanup_required` 是两个布尔标志。`approval_token` 是可选的审批令牌。`#[allow(clippy::struct_excessive_bools)]` 抑制了 Clippy 关于布尔字段过多的警告——在领域模型中，多个布尔标志是合理的。
 
-`LaneContext` 使用 Builder 模式构建：
-
 ```rust
 // claw-code/rust/crates/runtime/src/policy_engine.rs
 
@@ -645,7 +643,7 @@ impl LaneContext {
 }
 ```
 
-`new` 构造函数接收必填字段，可选字段通过 `with_*` 方法链式设置。每个 `with_*` 方法接收 `mut self`，修改后返回 `self`，支持 `context.with_retry_state(1, 3).with_rebase_required(true)` 这样的链式调用。这是 Rust Builder 模式的标准写法——用消费 self 的方法代替 Java 的返回新对象的 Builder。
+`new` 构造函数接收必填字段，可选字段通过 `with_*` 方法链式设置。每个 `with_*` 方法接收 `mut self`，修改后返回 `self`，支持 `context.with_retry_state(1, 3).with_rebase_required(true)` 这样的链式调用。
 
 ## 10.7 Lane 事件系统
 
@@ -748,7 +746,7 @@ pub enum WorkerStatus {
 
 七个状态描述了 Worker 从创建到完成的完整生命周期。`Spawning` 是初始状态——Worker 进程正在创建。`TrustRequired` 表示 Worker 需要用户信任确认（类似于 SSH 的 host key 验证）。`ToolPermissionRequired` 表示需要工具权限审批。`ReadyForPrompt` 表示 Worker 通过了所有门控，准备接收指令。`Running` 表示正在执行任务。`Finished` 和 `Failed` 是两种终态。
 
-这个状态机的设计理念是"启动即验证"——Worker 在接收任何指令之前，必须依次通过信任门控和权限门控。这防止了未经验证的 Worker 执行危险操作。在 Java 中，这类似于 Spring Security 的过滤器链——每个请求必须通过所有安全过滤器才能到达业务逻辑。
+这个状态机的设计理念是"启动即验证"——Worker 在接收任何指令之前，必须依次通过信任门控和权限门控。这防止了未经验证的 Worker 执行危险操作。
 
 `WorkerFailureKind` 定义了启动失败的具体类型：
 
@@ -788,27 +786,9 @@ pub enum WorkerEventKind {
 
 `StartupPreflightWarning` 是一个值得注意的事件——它不是错误，而是启动前检查中的警告。这允许系统在不阻塞启动的情况下记录潜在问题（如配置不一致、依赖版本不匹配），类似于飞机起飞前的预检清单。
 
-## 10.9 设计对比
+核心差异在于调度决策的制定者。claw-code 的 `PolicyEngine` 则将条件判断和动作选择都编码在规则中——规则本身是声明式的，但规则的评估和执行是确定性的。这与原版 Claude Code 的"LLM 作为调度引擎"有本质区别：原版让 LLM 自己决定拆成几个子任务，Rust 版则用规则引擎做确定性决策。
 
-| claw-code 概念 | Java 生态对应 |
-| --- | --- |
-| `TaskRegistry` | `ThreadPoolExecutor` + `FutureTask` |
-| `Task` | `FutureTask<TaskOutput>` |
-| `TaskStatus` | `FutureTask.State`（NEW → RUNNING → COMPLETED/CANCELLED） |
-| `LaneBoard` | Kanban 看板（Active/Blocked/Finished 三列） |
-| `PolicyEngine` | Drools 规则引擎 |
-| `PolicyRule` | Drools 的 `rule "name" when condition then action` |
-| `PolicyCondition::And/Or` | Drools 的 `and`/`or` 条件组合 |
-| `PolicyAction::Chain` | Composite Action 模式 |
-| `LaneContext` | `ProcessContext` / `ExecutionContext` |
-| `LaneEventName` | 领域事件（Domain Event） |
-| `WorkerBoot` 状态机 | Spring Security 过滤器链 |
-| `WorkerFailureKind` | 异常分类体系 |
-| Python `ExecutionRegistry` | `ServiceLocator` 模式（接口契约骨架） |
-
-核心差异在于调度决策的制定者。Java 的 Saga 或工作流引擎（如 Camunda）将拆分策略、并发度和失败重试逻辑写在代码或 BPMN 流程图中。claw-code 的 `PolicyEngine` 则将条件判断和动作选择都编码在规则中——规则本身是声明式的，但规则的评估和执行是确定性的。这与原版 Claude Code 的"LLM 作为调度引擎"有本质区别：原版让 LLM 自己决定拆成几个子任务，Rust 版则用规则引擎做确定性决策。
-
-Python 重写版目前的位置，相当于一个只实现了 `ServiceLocator` 接口骨架、但预留了完整元数据的 Java 项目。`ExecutionRegistry` 和快照系统扮演了接口契约的角色，让未来的多 Agent 实现有明确的接入点。Rust 版则更进一步，已经实现了 `TaskRegistry`（任务状态机）、`PolicyEngine`（规则评估）和 `WorkerBoot`（启动门控），构成了一个可运行的多 Agent 控制平面。
+`ExecutionRegistry` 和快照系统扮演了接口契约的角色，让未来的多 Agent 实现有明确的接入点。Rust 版则更进一步，已经实现了 `TaskRegistry`（任务状态机）、`PolicyEngine`（规则评估）和 `WorkerBoot`（启动门控），构成了一个可运行的多 Agent 控制平面。
 
 ## 10.10 本章小结
 

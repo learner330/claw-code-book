@@ -58,7 +58,7 @@ loop_parser.add_argument('--max-turns', type=int, default=3)
 loop_parser.add_argument('--structured-output', action='store_true')
 ```
 
-`prompt` 是位置参数（必传），`--limit`、`--max-turns` 是可选参数，`--structured-output` 是开关。这种参数声明方式和 Java 的 CLI 库（如 Picocli）几乎一样——Picocli 用 `@Parameters` 和 `@Option` 注解，argparse 用 `add_argument` 方法调用，本质都是把命令行字符串映射为类型化的参数对象。
+`prompt` 是位置参数（必传），`--limit`、`--max-turns` 是可选参数，`--structured-output` 是开关。
 
 `main()` 函数是分发入口，用 if-elif 链逐个匹配 `args.command`：
 
@@ -87,7 +87,7 @@ def main(argv: list[str] | None = None) -> int:
 
 Python 版为什么用 if-elif 而不是字典分发？因为每个子命令的参数集不同，`args` 对象上的属性也不同。如果用字典 `{'summary': handle_summary, ...}`，每个 handler 仍然需要从 `args` 上取自己的参数，类型检查和参数验证的逻辑不会减少。if-elif 链虽然没有字典优雅，但更直观——每个分支的上下文是完整的 `args` 对象，不需要额外的参数提取层。
 
-在 Java 生态中，Spring Shell 用 `@ShellComponent` + `@ShellMethod` 注解注册命令，Spring MVC 用 `@RequestMapping` 路由到 Controller 方法。两者都是声明式的——命令和处理逻辑的绑定关系由框架在运行时通过反射建立。Python 版的 if-elif 链是命令式的——绑定关系在代码中显式写出来。前者更优雅，后者更透明。
+两者都是声明式的——命令和处理逻辑的绑定关系由框架在运行时通过反射建立。Python 版的 if-elif 链是命令式的——绑定关系在代码中显式写出来。前者更优雅，后者更透明。
 
 ### Rust 版：CliAction 枚举与穷尽匹配
 
@@ -155,8 +155,6 @@ enum CliAction {
 每个枚举变体对应一种 CLI 行为，变体携带的数据就是该行为所需的全部参数。比如 `Prompt` 变体携带 `prompt`（用户输入的文本）、`model`（模型选择）、`permission_mode`（权限模式）等，这些都是从命令行参数解析出来的。
 
 Rust 的 `match` 是穷尽的——编译器强制你处理所有枚举变体，否则编译不通过。这意味着如果未来新增了一个 `CliAction` 变体但忘了在 `match` 中处理，编译阶段就会报错。Python 版的 if-elif 链没有这个保证——如果新增了一个子命令但忘了加 if 分支，运行时才会发现（走到 `parser.error` 分支）。
-
-这个差异在 Java 中也有对应。Java 的 `switch` 语句在 `switch` 表达式（Java 14+）中也是穷尽的，但传统的 `switch` 语句不强制。Sealed class（Java 17+）配合 `switch` 表达式可以实现和 Rust 枚举匹配类似的安全性。
 
 `CliAction::Prompt` 是最核心的变体——用户输入 `claude "帮我写一个快速排序"` 时就走这个分支。它携带的参数决定了后续整个 Bootstrap 流程的配置：
 
@@ -267,8 +265,6 @@ def start_project_scan(root: Path) -> PrefetchResult:
 三个预加载分别做不同的事：`mdm_raw_read` 预读设备管理清单（MDM），用于企业环境中检测安全策略；`keychain_prefetch` 预读系统密钥链，用于后续的 OAuth 凭证获取；`project_scan` 扫描项目根目录结构，用于后续的工具注册和路径检查。
 
 在 Python 移植版中这些函数返回的是模拟结果（`Simulated`），实际的预加载逻辑在 Rust 版中实现。但设计意图是清晰的：把 I/O 密集型操作提前到启动最早期，与后续的 CPU 密集型操作（参数解析、配置合并）并行，减少总启动时间。
-
-这与 Spring Boot 的早期初始化类似。Spring Boot 在 `ApplicationContext` 刷新之前会先加载 `Environment`（读取 `application.properties`、解析环境变量），然后才开始扫描 Bean 定义。claw-code 的 prefetch 阶段对应 Spring Boot 的 `Environment` 准备阶段。
 
 ### 阶段 3：trust gate
 
@@ -396,7 +392,7 @@ def run_deferred_init(trusted: bool) -> DeferredInitResult:
         )
 ```
 
-这与 Spring Boot 的 `@Lazy` 注解理念不同。Spring Boot 的延迟初始化是按 Bean 粒度的——每个 Bean 可以独立声明 `@Lazy`。claw-code 的延迟初始化是按 trust 级别批量控制的——一个 `trusted` 布尔值决定四个组件的开关。这是因为 claw-code 的安全模型更粗粒度：要么完全可信（本地开发），要么完全不可信（CI 环境），中间状态很少需要。
+claw-code 的延迟初始化是按 trust 级别批量控制的——一个 `trusted` 布尔值决定四个组件的开关。这是因为 claw-code 的安全模型更粗粒度：要么完全可信（本地开发），要么完全不可信（CI 环境），中间状态很少需要。
 
 ### 阶段 6：mode routing
 
@@ -494,11 +490,11 @@ pub enum ConfigSource {
 
 每个层级的含义：
 
-User 级（`~/.claw/settings.json`）：用户在所有项目中共享的配置。比如默认模型选择、API 密钥存储方式。对应 Spring Boot 的 `application.properties` 放在 `~/.config/` 下的场景。
+User 级（`~/.claw/settings.json`）：用户在所有项目中共享的配置。比如默认模型选择、API 密钥存储方式。
 
-Project 级（`./.claw/settings.json`）：项目团队共享的配置，提交到 git。比如项目允许的 MCP 服务器列表、钩子定义。对应 Spring Boot 的 `src/main/resources/application.properties`。
+Project 级（`./.claw/settings.json`）：项目团队共享的配置，提交到 git。比如项目允许的 MCP 服务器列表、钩子定义。
 
-Local 级（`./.claw/settings.local.json`）：个人覆盖配置，不提交 git（应加入 `.gitignore`）。比如开发时临时切换到更强的模型、调试时开启额外日志。对应 Spring Boot 的 `application-local.properties`（配合 `spring.profiles.active=local`）。
+Local 级（`./.claw/settings.local.json`）：个人覆盖配置，不提交 git（应加入 `.gitignore`）。比如开发时临时切换到更强的模型、调试时开启额外日志。
 
 每个层级都有旧格式（`.claw.json` 平铺在目录下）和新格式（`.claw/settings.json` 放在子目录中）两种路径。旧格式是为了向后兼容，新格式是推荐用法。`discover()` 返回的列表顺序是 User → Project → Local，从低优先级到高优先级。
 
@@ -576,7 +572,7 @@ fn emit_config_warning_once(warning: &str) {
 
 第四，MCP 服务器合并（`merge_mcp_servers`）。MCP 配置不是简单的键值对，而是嵌套的服务器定义，需要专门的合并逻辑。每个 MCP 服务器有 `command`、`args`、`env` 等字段，高优先级的完整定义会覆盖低优先级的。
 
-第五，深度合并（`deep_merge_objects`）。这是配置合并的核心算法。它递归地合并两个 JSON 对象：对于同名键，如果两个值都是对象，递归合并；否则后加载的值直接覆盖先加载的值。这和 Spring Boot 的配置覆盖机制一致——`application-{profile}.properties` 中的值覆盖 `application.properties` 中的同名键。
+第五，深度合并（`deep_merge_objects`）。这是配置合并的核心算法。它递归地合并两个 JSON 对象：对于同名键，如果两个值都是对象，递归合并；否则后加载的值直接覆盖先加载的值。
 
 ### ConfigFileReport：键覆盖追踪
 
@@ -801,24 +797,11 @@ impl PermissionModeSource {
 
 当 `source` 是 `Default` 时，`is_explicit()` 返回 `false`，表示权限模式不是用户主动选择的，而是系统回退到默认值。这个信息在 `claw status` 中展示，提醒用户当前权限是默认值而非显式选择。
 
-## 设计对比
+claw-code 的 Bootstrap 分为：prefetch → env guards → CLI parse + trust gate → setup + parallel load → deferred init → mode routing → Turn Loop。
 
-| claw-code 概念 | Java 生态对应 | 对比说明 |
-| --- | --- | --- |
-| `CliAction` 枚举穷尽匹配 | Spring MVC `@RequestMapping` | 枚举匹配编译时安全，注解路由运行时灵活 |
-| Bootstrap 七阶段 | Spring Boot 启动阶段 | 结构相似，claw-code 的 trust gate 是 Spring Boot 没有的 |
-| `ConfigLoader` 三层合并 | `application.properties` 多 profile 覆盖 | 机制一致，claw-code 额外有 `ConfigFileReport` 追踪 |
-| `deep_merge_objects` | Spring `PropertySource` 覆盖 | 递归合并 vs 扁平覆盖 |
-| `ModelProvenance` 四级溯源 | Spring `@Value` 来源链 | Spring 不主动暴露来源，claw-code 显式记录 |
-| `emit_config_warning_once` 去重 | Spring `DeprecationLogger` | 两者都解决重复警告问题 |
-| trust gate + deferred init | Spring `@ConditionalOnProperty` | 批量禁用 vs 逐 Bean 条件装配 |
-| `ApiTimeoutConfig` 默认值 | Spring Boot `application.yml` 默认值 | 两者都在代码中定义默认值，配置文件可覆盖 |
+两者的核心差异在 trust gate。claw-code 的 trust gate 是全局开关——一个布尔值决定四个子系统（插件、Skills、MCP、session hooks）的开关。
 
-Spring Boot 的启动过程和 claw-code 的 Bootstrap 七阶段在结构上高度相似。Spring Boot 的启动分为：准备 `Environment` → 创建 `ApplicationContext` → 注册 Bean 定义 → 初始化单例 Bean → 启动内嵌容器 → 执行 `ApplicationRunner`。claw-code 的 Bootstrap 分为：prefetch → env guards → CLI parse + trust gate → setup + parallel load → deferred init → mode routing → Turn Loop。
-
-两者的核心差异在 trust gate。Spring Boot 没有全局的"可信模式"概念，条件装配是按 Bean 粒度通过 `@ConditionalOnProperty`、`@Profile` 等注解实现的。claw-code 的 trust gate 是全局开关——一个布尔值决定四个子系统（插件、Skills、MCP、session hooks）的开关。这是因为 Agent 系统的安全模型更关注"AI 能否执行外部代码"，而传统 Web 应用更关注"哪些 Bean 需要加载"。
-
-配置合并机制几乎一致。Spring Boot 的 `PropertySource` 链按优先级排列配置来源（命令行参数 > 环境变量 > `application-{profile}.properties` > `application.properties`），高优先级覆盖低优先级。claw-code 的 `ConfigLoader` 按三层排列（Local > Project > User），`deep_merge_objects` 递归合并。差异在于 Spring Boot 的覆盖是扁平的（同名键直接替换），claw-code 的合并是递归的（对象类型的值会递归合并子键）。`ConfigFileReport` 的 `wins_for_keys` 和 `shadowed_keys` 提供了 Spring Boot `--debug` 模式下的配置来源追踪能力，但粒度更细——精确到每个键而非每个 PropertySource。
+配置合并机制几乎一致。claw-code 的 `ConfigLoader` 按三层排列（Local > Project > User），`deep_merge_objects` 递归合并。
 
 ## 小结
 
