@@ -10,6 +10,10 @@ export default defineConfig({
   // 排除 claw-code 源码目录，不参与构建
   srcExclude: ['claw-code/**'],
 
+  head: [
+    ['link', { rel: 'stylesheet', href: '/claw-code-book/style.css' }],
+  ],
+
   themeConfig: {
     nav: [
       { text: '首页', link: '/' },

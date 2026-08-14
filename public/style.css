@@ -1,0 +1,117 @@
+/* 首页 Hero 区域美化 */
+
+.VPHome {
+  padding-bottom: 0;
+}
+
+.VPHomeHero {
+  padding: 120px 24px 100px;
+  background: linear-gradient(135deg, #0f172a 0%, #1e293b 40%, #334155 100%);
+  position: relative;
+  overflow: hidden;
+}
+
+.VPHomeHero::before {
+  content: '';
+  position: absolute;
+  top: -50%;
+  right: -20%;
+  width: 600px;
+  height: 600px;
+  background: radial-gradient(circle, rgba(59, 130, 246, 0.15) 0%, transparent 70%);
+  pointer-events: none;
+}
+
+.VPHomeHero::after {
+  content: '';
+  position: absolute;
+  bottom: -30%;
+  left: -10%;
+  width: 400px;
+  height: 400px;
+  background: radial-gradient(circle, rgba(139, 92, 246, 0.12) 0%, transparent 70%);
+  pointer-events: none;
+}
+
+.VPHomeHero .container {
+  max-width: 720px;
+  margin: 0 auto;
+  text-align: center;
+  position: relative;
+  z-index: 1;
+}
+
+.VPHomeHero .name {
+  font-size: 48px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: #f8fafc;
+  letter-spacing: -0.5px;
+  max-width: none;
+}
+
+.VPHomeHero .name .clip {
+  background: linear-gradient(120deg, #60a5fa 30%, #a78bfa 70%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.VPHomeHero .text {
+  font-size: 24px;
+  font-weight: 400;
+  color: #94a3b8;
+  margin-top: 16px;
+  max-width: none;
+}
+
+.VPHomeHero .tagline {
+  font-size: 16px;
+  color: #64748b;
+  margin-top: 20px;
+  line-height: 1.6;
+  max-width: 560px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.VPHomeHero .actions {
+  justify-content: center;
+  margin-top: 40px;
+  gap: 16px;
+}
+
+.VPHomeHero .actions .VPButton {
+  border-radius: 8px;
+  padding: 10px 28px;
+  font-size: 15px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.VPHomeHero .actions .VPButton.brand {
+  background: linear-gradient(135deg, #3b82f6 0%, #6366f1 100%);
+  border: none;
+  box-shadow: 0 4px 14px rgba(59, 130, 246, 0.35);
+}
+
+.VPHomeHero .actions .VPButton.brand:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(59, 130, 246, 0.45);
+}
+
+.VPHomeHero .actions .VPButton.alt {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #cbd5e1;
+}
+
+.VPHomeHero .actions .VPButton.alt:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+/* 首页内容区域 */
+.VPHome .VPHomeFeatures {
+  display: none;
+}
