@@ -45,11 +45,6 @@ export default defineConfig({
       { icon: 'github', link: 'https://github.com/learner330/claw-code-book' },
     ],
 
-    editLink: {
-      pattern: 'https://github.com/learner330/claw-code-book/edit/main/:path',
-      text: '编辑此页',
-    },
-
     search: {
       provider: 'local',
     },
