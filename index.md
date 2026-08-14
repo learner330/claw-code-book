@@ -21,18 +21,18 @@ hero:
 <ul class="chapter-list">
   <li><a href="/claw-code-book/chapter-00/intro"><span class="ch-num">导读</span>本书介绍与阅读指南</a></li>
   <li><a href="/claw-code-book/chapter-01/what-is-agent"><span class="ch-num">第 1 章</span>什么是 Agent</a></li>
-  <li><a href="/claw-code-book/chapter-02/llm-basics"><span class="ch-num">第 2 章</span>LLM 最小必要知识</a></li>
-  <li><a href="/claw-code-book/chapter-03/architecture"><span class="ch-num">第 3 章</span>整体架构全景</a></li>
+  <li><a href="/claw-code-book/chapter-02/architecture"><span class="ch-num">第 2 章</span>整体架构全景</a></li>
+  <li><a href="/claw-code-book/chapter-03/architecture"><span class="ch-num">第 3 章</span>启动到第一条消息</a></li>
   <li><a href="/claw-code-book/chapter-04/startup"><span class="ch-num">第 4 章</span>启动流程深度解析</a></li>
-  <li><a href="/claw-code-book/chapter-05/tools"><span class="ch-num">第 5 章</span>工具系统</a></li>
-  <li><a href="/claw-code-book/chapter-06/turn-loop"><span class="ch-num">第 6 章</span>查询引擎与 Turn Loop</a></li>
-  <li><a href="/claw-code-book/chapter-07/permissions"><span class="ch-num">第 7 章</span>权限系统</a></li>
-  <li><a href="/claw-code-book/chapter-08/hooks"><span class="ch-num">第 8 章</span>钩子系统</a></li>
-  <li><a href="/claw-code-book/chapter-09/session"><span class="ch-num">第 9 章</span>状态机与会话管理</a></li>
-  <li><a href="/claw-code-book/chapter-10/coordinator"><span class="ch-num">第 10 章</span>协调器：多 Agent 编排</a></li>
-  <li><a href="/claw-code-book/chapter-11/plugins"><span class="ch-num">第 11 章</span>插件系统与命令扩展</a></li>
+  <li><a href="/claw-code-book/chapter-05/tools"><span class="ch-num">第 5 章</span>工具系统：ToolPool 与工具注册</a></li>
+  <li><a href="/claw-code-book/chapter-06/turn-loop"><span class="ch-num">第 6 章</span>Turn Loop：查询引擎与多轮交互</a></li>
+  <li><a href="/claw-code-book/chapter-07/permissions"><span class="ch-num">第 7 章</span>权限系统：PolicyEngine 与路径检查</a></li>
+  <li><a href="/claw-code-book/chapter-08/hooks"><span class="ch-num">第 8 章</span>钩子系统：Hook 注册与生命周期</a></li>
+  <li><a href="/claw-code-book/chapter-09/session"><span class="ch-num">第 9 章</span>会话管理：状态机与消息历史</a></li>
+  <li><a href="/claw-code-book/chapter-10/coordinator"><span class="ch-num">第 10 章</span>协调器：TaskRegistry 与多 Agent 编排</a></li>
+  <li><a href="/claw-code-book/chapter-11/plugins"><span class="ch-num">第 11 章</span>插件与命令扩展</a></li>
   <li><a href="/claw-code-book/chapter-12/rust-rewrite"><span class="ch-num">第 12 章</span>Rust 重构版深度解读</a></li>
-  <li><a href="/claw-code-book/chapter-13/comparison"><span class="ch-num">第 13 章</span>TypeScript 原版 vs Python/Rust 对比</a></li>
+  <li><a href="/claw-code-book/chapter-13/comparison"><span class="ch-num">第 13 章</span>TypeScript vs Python/Rust 对比</a></li>
   <li><a href="/claw-code-book/chapter-14/mindset"><span class="ch-num">第 14 章</span>从 Java 工程师到 Agent 工程师</a></li>
   <li><a href="/claw-code-book/chapter-15/config-layer"><span class="ch-num">第 15 章</span>配置层</a></li>
   <li><a href="/claw-code-book/chapter-16/workflow"><span class="ch-num">第 16 章</span>AI-Native 工程工作流</a></li>

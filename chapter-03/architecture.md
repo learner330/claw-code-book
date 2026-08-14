@@ -1,239 +1,152 @@
-# 第3章 整体架构全景
+# 第3章 启动到第一条消息
 
-claw-code 的代码库由两个并行的实现组成：一个 Python 移植工作区和一个 Rust 重写版。在深入单个子系统之前，先建立整体的空间感，明确每个模块和 crate 各自承担什么职责、它们之间如何连接。
+## 本章概览
 
-## 3.1 双实现布局
+本章追踪一次完整的命令执行路径：从用户在终端输入 `claude "帮我写一个快速排序"`，到第一条 LLM 响应流出，数据依次经过哪些模块、执行什么操作。
 
-仓库根目录下并存两套实现，分别位于 `src/` 和 `rust/crates/`。Python 版的定位写在了 `main.py` 的 parser 描述里：
+本章不展开任何模块的内部实现——那是第4到第11章的任务。本章的作用是勾画路径，让读者建立"一条命令经过哪些地方"的整体印象。全章只包含 5 个代码片段，每个只展示关键路径上的入口点。
 
-```python
-# claw-code/src/main.py
+| 关键文件 | 职责 |
+| --- | --- |
+| `rust/crates/rusty-claude-cli/src/main.rs` | CLI 入口，参数解析 |
+| `rust/crates/runtime/src/config.rs` | 配置加载与三层合并 |
+| `rust/crates/runtime/src/conversation.rs` | 会话创建与消息管理 |
+| `rust/crates/api/src/client.rs` | LLM 通信 |
+| `src/bootstrap_graph.py` | Bootstrap 七阶段定义 |
 
-parser = argparse.ArgumentParser(description='Python porting workspace for the Claude Code rewrite effort')
+## 3.1 CLI 入口：命令被接收
+
+用户输入 `claude "帮我写一个快速排序"` 后，Rust 版的 `main()` 函数接收命令行参数。`main()` 只做错误包装，核心逻辑在 `run()` 中：
+
+```rust
+// claw-code/rust/crates/rusty-claude-cli/src/main.rs
+
+fn run() -> Result<(), Box<dyn std::error::Error>> {
+    let args: Vec<String> = env::args().skip(1).collect();
+    let (args, cwd) = split_global_cwd_args(&args)?;
+    apply_global_cwd(cwd)?;
+    match parse_args(&args)? {
+        CliAction::Prompt { prompt, model, .. } => {
+            // 进入交互模式，启动 Turn Loop
+        }
+        CliAction::Version { .. } => print_version(),
+        // ...其他分支
+    }
+}
 ```
 
-Python 工作区是一个"移植"项目，其目标是把原版 TypeScript 代码的模块表面镜像过来，用于盘点、路由和模拟，而不是真正的生产 CLI。真正的生产实现是 Rust 重写版，位于 `rust/crates/` 下的 workspace 中：
+`parse_args` 把参数解析为 `CliAction` 枚举。用户输入的 prompt 文本匹配到 `CliAction::Prompt` 变体，携带 prompt 内容、模型选择、权限模式等参数。枚举匹配是穷尽的，编译器保证所有分支都被处理。
 
-```toml
-# claw-code/rust/Cargo.toml
+这条命令不会走 `Version` 或 `Status` 等快速退出路径，而是进入完整的 Bootstrap 流程。
 
-[workspace]
-members = ["crates/*"]
-resolver = "2"
+## 3.2 Bootstrap 七阶段：系统就绪
 
-[workspace.lints.rust]
-unsafe_code = "forbid"
-```
-
-两个实现的定位差异决定了阅读方式：Python 侧看的是"概念地图"，每个文件对应原版的一个子系统；Rust 侧看的是"真实执行"，每个 crate 是编译后真正跑起来的代码。Rust workspace 强制 `unsafe_code = "forbid"`，说明重写版把内存安全作为硬约束。
-
-| 维度 | Python 移植工作区 | Rust 重写版 |
-| --- | --- | --- |
-| 位置 | `src/` | `rust/crates/` |
-| 定位 | 移植进度盘点、路由模拟 | 生产 CLI |
-| 入口 | `main.py` | `rusty-claude-cli/src/main.rs` |
-| 模块组织 | 单层 Python 包 + 顶层模块 | Cargo workspace + 多个 crate |
-| 数据来源 | 归档 TypeScript 快照 | 真实逻辑实现 |
-
-## 3.2 Python 工作区的模块清单
-
-Python 侧没有正式的依赖注入容器，模块关系靠文件扫描自动盘点。`port_manifest.py` 扫描 `src/` 下所有 `.py` 文件，按顶层目录统计出每个子系统的文件数：
-
-```python
-# claw-code/src/port_manifest.py
-
-def build_port_manifest(src_root: Path | None = None) -> PortManifest:
-    root = src_root or DEFAULT_SRC_ROOT
-    files = [path for path in root.rglob('*.py') if path.is_file()]
-    counter = Counter(
-        path.relative_to(root).parts[0] if len(path.relative_to(root).parts) > 1 else path.name
-        for path in files
-        if path.name != '__pycache__'
-    )
-    modules = tuple(
-        Subsystem(name=name, path=f'src/{name}', file_count=count, notes=notes.get(name, 'Python port support module'))
-        for name, count in counter.most_common()
-    )
-    return PortManifest(src_root=root, total_python_files=len(files), top_level_modules=modules)
-```
-
-清单的结果是两个数据结构：`Subsystem` 描述单个子系统的文件数和注释，`PortManifest` 汇总整个工作区：
-
-```python
-# claw-code/src/models.py
-
-@dataclass(frozen=True)
-class Subsystem:
-    name: str
-    path: str
-    file_count: int
-    notes: str
-```
-
-`notes` 字段对关键模块做了人工标注，见 `port_manifest.py` 顶部的字典。`main.py` 的 `subsystems` 子命令就靠这个清单输出工作区的模块列表。这套机制说明 Python 侧的核心模块之间没有显式的 import 依赖树，而是靠约定和盘点来维持"全景"。
-
-## 3.3 RuntimeSession：会话数据流的中枢
-
-理解架构最直接的方式是看一次会话要经过哪些组件。`runtime.py` 中的 `RuntimeSession` dataclass 把一次完整交互的所有中间产物都列了出来：
-
-```python
-# claw-code/src/runtime.py
-
-@dataclass
-class RuntimeSession:
-    prompt: str
-    context: PortContext
-    setup: WorkspaceSetup
-    setup_report: SetupReport
-    system_init_message: str
-    history: HistoryLog
-    routed_matches: list[RoutedMatch]
-    turn_result: TurnResult
-    command_execution_messages: tuple[str, ...]
-    tool_execution_messages: tuple[str, ...]
-    stream_events: tuple[dict[str, object], ...]
-    persisted_session_path: str
-```
-
-这 12 个字段按执行顺序排列，恰好是会话生命周期的完整快照：输入 `prompt`，装配 `context` 和 `setup_report`，生成 `system_init_message`，路由出 `routed_matches`，执行命令和工具得到两组消息，产出 `turn_result` 和 `stream_events`，最后写入 `persisted_session_path`。组装这些字段的是 `bootstrap_session` 方法：
-
-```python
-# claw-code/src/runtime.py
-
-def bootstrap_session(self, prompt: str, limit: int = 5) -> RuntimeSession:
-    context = build_port_context()
-    setup_report = run_setup(trusted=True)
-    setup = setup_report.setup
-    history = HistoryLog()
-    engine = QueryEnginePort.from_workspace()
-    matches = self.route_prompt(prompt, limit=limit)
-    registry = build_execution_registry()
-    command_execs = tuple(registry.command(match.name).execute(prompt) for match in matches if match.kind == 'command' and registry.command(match.name))
-    tool_execs = tuple(registry.tool(match.name).execute(prompt) for match in matches if match.kind == 'tool' and registry.tool(match.name))
-    denials = tuple(self._infer_permission_denials(matches))
-    stream_events = tuple(engine.stream_submit_message(prompt, ...))
-    turn_result = engine.submit_message(prompt, ...)
-    persisted_session_path = engine.persist_session()
-    return RuntimeSession(...)
-```
-
-这段代码把第 1 章和第 2 章介绍过的组件串成了一条线。`PortRuntime` 负责路由，`QueryEnginePort` 负责 turn 执行和持久化，`HistoryLog` 记录每一步的日志，`execution_registry` 统一命令和工具的执行入口。它们之间的调用关系可以用一张图概括：
-
-```mermaid
-graph TD
-    A[prompt] --> B[build_port_context]
-    B --> C[run_setup]
-    C --> D[route_prompt 路由]
-    D --> E[build_execution_registry]
-    E --> F[execute commands/tools]
-    F --> G[infer_permission_denials]
-    G --> H[QueryEnginePort.submit_message]
-    H --> I[persist_session]
-    I --> J[RuntimeSession]
-```
-
-## 3.4 Bootstrap Graph：启动骨架
-
-启动阶段在 `bootstrap_graph.py` 中被固化为七个命名的 stage，构成整个系统启动的骨架：
+Bootstrap 是从命令接收到 Turn Loop 启动之间的初始化过程。Python 版在 `bootstrap_graph.py` 中定义了七个阶段：
 
 ```python
 # claw-code/src/bootstrap_graph.py
 
-def build_bootstrap_graph() -> BootstrapGraph:
-    return BootstrapGraph(
-        stages=(
-            'top-level prefetch side effects',
-            'warning handler and environment guards',
-            'CLI parser and pre-action trust gate',
-            'setup() + commands/agents parallel load',
-            'deferred init after trust',
-            'mode routing: local / remote / ssh / teleport / direct-connect / deep-link',
-            'query engine submit loop',
-        )
-    )
+stages=(
+    'top-level prefetch side effects',     # 预加载清单文件
+    'warning handler and environment guards', # 环境检查
+    'CLI parser and pre-action trust gate',   # 参数解析和可信判断
+    'setup() + commands/agents parallel load', # 加载命令和 Agent
+    'deferred init after trust',              # 延迟初始化
+    'mode routing: local / remote / ssh / ...', # 模式路由
+    'query engine submit loop',               # 进入 Turn Loop
+)
 ```
 
-这七个 stage 是架构层面的时间线：从预取副作用，到环境守卫、信任门禁、并行加载、延迟初始化、模式路由，最后进入提交循环。每个 stage 的细节在第 4 章展开，这里只需记住它定义了系统"从上电到运行"的骨架。`system_init.py` 的 `build_system_init_message` 会把这个骨架和加载数量汇总成一段初始化报告，供 `RuntimeSession` 使用：
+七个阶段的职责：
 
-```python
-# claw-code/src/system_init.py
+| 阶段 | 作用 |
+| --- | --- |
+| 1. prefetch | 预加载端口清单、密钥链、项目扫描结果 |
+| 2. env guards | 设置全局警告处理器，检查运行环境 |
+| 3. CLI parse + trust gate | 解析参数，判断是否可信模式 |
+| 4. setup + parallel load | 加载命令定义和 Agent 配置 |
+| 5. deferred init | 延迟初始化非关键组件 |
+| 6. mode routing | 选择运行模式（local/remote/ssh 等） |
+| 7. query engine submit loop | 启动 Turn Loop |
 
-def build_system_init_message(trusted: bool = True) -> str:
-    setup = run_setup(trusted=trusted)
-    commands = get_commands()
-    tools = get_tools()
-    lines = [
-        '# System Init',
-        f'Trusted: {setup.trusted}',
-        f'Loaded command entries: {len(commands)}',
-        f'Loaded tool entries: {len(tools)}',
-        'Startup steps:',
-        *(f'- {step}' for step in setup.setup.startup_steps()),
-    ]
-    return '\n'.join(lines)
-```
+阶段 3 的 trust gate 是关键分支点。可信模式下全量加载工具和命令，不可信模式下跳过部分加载以减少攻击面。本次 `claude "帮我写一个快速排序"` 走的是可信路径，进入阶段 4-7 的完整流程。
 
-## 3.5 Rust runtime crate 的公共 API 地图
+## 3.3 配置加载：三层合并
 
-Rust 重写版的核心是 `runtime` crate。它的模块清单写在 `lib.rs` 顶部注释里，一句点明了职责边界：
+Bootstrap 阶段 4 之前，`ConfigLoader` 加载三层配置文件并合并。三个层次从低到高：
+
+| 层级 | 文件路径 | 作用 |
+| --- | --- | --- |
+| User | `~/.claw/settings.json` | 用户全局配置 |
+| Project | `.claw/settings.json` | 项目共享配置 |
+| Local | `.claw/settings.local.json` | 个人本地覆盖（不提交 git） |
+
+`ConfigLoader::discover()` 返回按优先级排列的文件列表，`load()` 逐个读取并通过 `deep_merge_objects` 合并，后加载的覆盖先加载的：
 
 ```rust
-// claw-code/rust/crates/runtime/src/lib.rs
+// claw-code/rust/crates/runtime/src/config.rs
 
-//! Core runtime primitives for the `claw` CLI and supporting crates.
-//! This crate owns session persistence, permission evaluation, prompt assembly,
-//! MCP plumbing, tool-facing file operations, and the core conversation loop
-//! that drives interactive and one-shot turns.
+pub fn load(&self) -> Result<RuntimeConfig, ConfigError> {
+    let mut merged = BTreeMap::new();
+    for entry in self.discover() {
+        let OptionalConfigFile::Loaded(parsed) = read_optional_json_object(&entry.path)? else {
+            continue;
+        };
+        deep_merge_objects(&mut merged, &parsed.object); // 后加载的覆盖先加载的
+    }
+    build_runtime_config(merged, ...)
+}
 ```
 
-`lib.rs` 的 `mod` 声明就是 runtime crate 的模块地图，按职责可以分组如下：
+合并后的 `RuntimeConfig` 包含模型选择、权限模式、MCP 服务器配置、钩子配置等所有运行时参数。这些参数在后续阶段被各模块使用。
 
-| 职责 | 模块 |
+## 3.4 工具注册与权限初始化
+
+配置加载完成后，Bootstrap 阶段 4 注册工具，阶段 5 初始化权限。
+
+工具注册由 `ToolPool` 完成，加载所有内置工具（文件读写、Bash 执行、代码搜索等）和 MCP 外部工具。每个工具注册时声明自己的名称、描述和参数 Schema，这些信息后续会发给 LLM，让 LLM 知道有哪些工具可用。
+
+权限初始化由 `PolicyEngine` 完成，根据配置中的 `PermissionMode` 设置操作边界：
+
+| 模式 | 允许的操作 |
 | --- | --- |
-| 会话持久化 | `session.rs`、`session_control.rs`、`summary_compression.rs`、`compact.rs` |
-| 权限评估 | `permissions.rs`、`policy_engine.rs`、`permission_enforcer.rs`、`trust_resolver.rs`、`approval_tokens.rs` |
-| Prompt 组装 | `prompt.rs` |
-| MCP 通信 | `mcp.rs`、`mcp_client.rs`、`mcp_stdio.rs`、`mcp_server.rs`、`mcp_tool_bridge.rs`、`mcp_lifecycle_hardened.rs` |
-| 文件操作 | `file_ops.rs`、`git_context.rs` |
-| 对话循环 | `conversation.rs` |
-| 配置 | `config.rs`、`config_validate.rs` |
-| 沙箱与工具 | `sandbox.rs`、`bash.rs`、`bash_validation.rs` |
+| ReadOnly | 只读，不允许任何写操作 |
+| WorkspaceWrite | 只允许写工作区目录 |
+| DangerFullAccess | 完全访问，无限制 |
 
-`lib.rs` 的另一半是大量的 `pub use` 再导出，把各模块内部的类型提升到 crate 根部，形成稳定的公共 API 面。例如 `session::Session`、`conversation::ConversationRuntime`、`config::RuntimeConfig` 都通过 `pub use` 暴露给外部 crate。`rusty-claude-cli` 正是通过这个公共面来调用 runtime 的，两者之间只有单向依赖。
+本次命令默认使用 `WorkspaceWrite` 模式，Agent 可以读写当前工作区目录中的文件，但不能修改系统文件。
 
-## 3.6 Rust workspace 的 crate 分工
+## 3.5 Turn Loop 启动：第一条消息进入循环
 
-Rust workspace 下共有 11 个 crate，各自有明确的边界：
+Bootstrap 阶段 7 启动 Turn Loop。`Conversation` 先被初始化，包含系统提示词（由 CLAUDE.md 和内置指令组成）和空的消息列表。然后用户的 prompt 被加入消息列表，`QueryEngine` 开始第一轮循环。
 
-| crate | 职责 |
-| --- | --- |
-| `rusty-claude-cli` | CLI 二进制入口，参数解析、模式分发、渲染 |
-| `runtime` | 核心运行时，会话、权限、MCP、配置、对话循环 |
-| `api` | LLM 供应商客户端，消息构建、SSE 解析、token 计量 |
-| `plugins` | 插件与钩子系统 |
-| `commands` | 命令元数据 |
-| `tools` | 工具实现，含 PDF 提取、lane 完成 |
-| `compat-harness` | TypeScript 与重写版的兼容性测试 |
-| `mock-anthropic-service` | 测试用的 Anthropic 模拟服务 |
-| `claw-rag-service` | RAG 检索服务，含 embedding 和 Qdrant 索引 |
-| `claw-analog` | 诊断工具，含 `doctor`、配置查看 |
-| `telemetry` | 遥测数据 |
+第一轮循环把完整的消息列表发给 LLM，LLM 返回响应。如果响应包含工具调用（比如"先读取项目结构"），Agent 执行工具后把结果加入消息列表，进入第二轮循环。如果响应不包含工具调用，循环结束，输出最终结果。
 
-依赖方向是 `rusty-claude-cli` 依赖 `runtime`，`runtime` 再依赖 `api`、`plugins`、`tools` 等底层 crate。这个单向依赖链对应了前面 `RuntimeSession` 里看到的调用顺序：入口层、运行时层、能力层。`claw-rag-service`、`claw-analog`、`mock-anthropic-service` 是相对独立的侧翼服务，不在主调用链上。
+```mermaid
+graph TD
+    A[用户输入: 帮我写一个快速排序] --> B[加入消息列表]
+    B --> C[第1轮: 发送消息给 LLM]
+    C --> D{LLM 响应包含工具调用?}
+    D -->|是| E[执行工具: 如读取文件]
+    E --> F[工具结果加入消息列表]
+    F --> C
+    D -->|否| G[输出最终结果: 排序代码]
+    G --> H[会话持久化]
+```
 
-## 设计对比
-
-| claw-code 概念 | Java 生态对应 |
-| --- | --- |
-| Python `src/` 移植工作区 | 概念模型层 / 移植盘点文档 |
-| `PortManifest` + `build_port_manifest` | 模块扫描器（类似 jdeps / classpath 扫描） |
-| `RuntimeSession` | 一次请求的 `RequestContext` 聚合对象 |
-| `lib.rs` 的 `pub use` 再导出 | Maven 模块的公开 `api` 包 |
-| Rust workspace 11 个 crate | 多模块 Maven/Gradle 工程 |
-| `rusty-claude-cli → runtime → api/tools` 依赖链 | 分层架构：web 层 → service 层 → dao 层 |
-
-Rust workspace 的 crate 划分对应 Java 多模块工程。`runtime` 类似 service 层，聚合了会话、权限、MCP 等核心能力；`api` 类似一个独立的 HTTP client 模块；`rusty-claude-cli` 类似 web 层，只做参数解析和渲染。`lib.rs` 中把内部类型用 `pub use` 提升到 crate 根部，相当于 Java 里把模块内部的实现类封装起来、只暴露 `public` 接口包。区别在于 Java 靠 package 和 `public` 关键字控制可见性，Rust 靠 `pub mod` 和 `pub use` 显式声明每一层边界。
+从用户输入到第一条 LLM 响应流出，数据经过了 CLI 入口、Bootstrap 七阶段、配置加载、工具注册、权限初始化、会话创建、Turn Loop 启动这七个环节。每个环节的具体实现在后续章节展开。
 
 ## 小结
 
-本章建立了 claw-code 的整体空间感。代码库由 Python 移植工作区（`src/`）和 Rust 重写版（`rust/crates/`）组成，前者做概念盘点，后者做生产实现。Python 侧靠 `port_manifest.py` 的 `build_port_manifest` 扫描生成模块清单，`runtime.py` 的 `RuntimeSession` 聚合了会话的全部中间产物，`bootstrap_graph.py` 固化了七个启动阶段。Rust 侧的 `runtime` crate 以 `lib.rs` 的模块声明和 `pub use` 再导出为公共 API 面，workspace 下 11 个 crate 按入口层、运行时层、能力层单向依赖。
+一次完整的命令执行经过七个环节：CLI 入口接收参数、Bootstrap 七阶段完成初始化、ConfigLoader 三层合并配置、ToolPool 注册工具、PolicyEngine 设置权限边界、Conversation 初始化会话、QueryEngine 启动 Turn Loop。其中 Bootstrap 的 trust gate 决定加载范围，ConfigLoader 的三层合并决定运行参数，Turn Loop 的循环决定执行路径。
+
+下一章将深入 Bootstrap 的第一个环节——CLI 入口和启动流程的完整源码实现。
+
+| 关键文件 | 对应章节 |
+| --- | --- |
+| `rusty-claude-cli/src/main.rs` | 第4章 |
+| `runtime/src/config.rs` | 第4章 |
+| `runtime/src/conversation.rs` | 第6章 |
+| `api/src/client.rs` | 第6章 |
+| `runtime/src/policy_engine.rs` | 第7章 |
+| `runtime/src/session.rs` | 第9章 |

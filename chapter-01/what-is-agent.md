@@ -1,202 +1,92 @@
 # 第1章 什么是 Agent
 
-claw-code 不是一个传统意义上的命令行工具。它具备感知用户输入、自主决策和调用外部工具的能力，这些特征正是软件 Agent 的核心定义。理解 Agent 的基本模型，是阅读后续章节源码的前提。
+## 本章概览
 
-## 1.1 感知-决策-执行循环
+本章建立 Agent 的概念框架。不涉及任何源码，目标是读完之后能向同事解释清楚"Agent 和传统 CLI 工具有什么本质区别"。
 
-Agent 的本质是一个闭环：接收环境输入，做出决策，执行动作，然后观察结果。claw-code 将这个循环抽象为 `TurnResult`，每个 turn 记录一次完整的交互结果。
+本章是全书的认知地基，后续 17 章会逐步展开 Agent 各个组件的源码实现。在进入源码之前，先明确 Agent 的定义、特征和与传统软件的差异。
 
-```python
-# claw-code/src/query_engine.py
+## 1.1 Agent 的定义
 
-@dataclass(frozen=True)
-class TurnResult:
-    prompt: str
-    output: str
-    matched_commands: tuple[str, ...]
-    matched_tools: tuple[str, ...]
-    permission_denials: tuple[PermissionDenial, ...]
-    usage: UsageSummary
-    stop_reason: str
-```
+Agent 是一个能自主感知环境、做出决策、执行动作并观察结果的软件系统。这个定义有三个关键词：
 
-`TurnResult` 的字段直接映射了 Agent 循环的六个阶段：接收输入（prompt）、产生输出（output）、匹配命令（matched_commands）、匹配工具（matched_tools）、权限拦截（permission_denials）和停止判定（stop_reason）。stop_reason 的取值包括 `completed`、`max_turns_reached` 和 `max_budget_reached`，决定了循环是否继续。
+自主：Agent 不是被动等待人类指令逐步操作，而是接收一个目标后自己决定执行路径。人类给出"帮我写一个快速排序"，Agent 自己决定是先读项目结构、还是先写代码、还是先写测试。
 
-## 1.2 Runtime：Agent 的运行时容器
+感知-决策-执行：这是一个闭环。Agent 感知环境（读取文件、接收用户输入），做出决策（调用 LLM 生成方案），执行动作（写文件、运行命令），然后把执行结果反馈回来，进入下一轮感知。
 
-`PortRuntime` 是 claw-code Agent 的运行时容器，负责将用户输入路由到匹配的命令和工具，并组装完整的会话。
+观察结果：Agent 不是"执行完就结束"。它会观察上一步动作的结果，判断是否需要继续。如果写的代码编译报错了，它看到错误信息后会自己修改，不需要人再下一条指令。
 
-```python
-# claw-code/src/runtime.py
+## 1.2 传统 CLI vs Agent CLI
 
-class PortRuntime:
-    def route_prompt(self, prompt: str, limit: int = 5) -> list[RoutedMatch]:
-        explicit_command = self._explicit_command_match(prompt)
-        tokens = {token.lower() for token in prompt.replace('/', ' ').replace('-', ' ').split() if token}
-        by_kind = {
-            'command': self._collect_matches(tokens, PORTED_COMMANDS, 'command'),
-            'tool': self._collect_matches(tokens, PORTED_TOOLS, 'tool'),
-        }
-        # 显式命令优先，然后各取一个命令和一个工具，剩余按分数排序
-        selected: list[RoutedMatch] = []
-        if explicit_command is not None:
-            selected.append(explicit_command)
-        # ...
-```
+| 维度 | 传统 CLI（如 git、mvn） | Agent CLI（如 claw-code） |
+| --- | --- | --- |
+| 执行模式 | 一条命令对应一个固定动作 | 一条指令触发自主多步执行 |
+| 控制流 | 人类编写脚本串联命令 | Agent 内部循环决定下一步 |
+| 输出确定性 | 相同输入必定相同输出 | 相同输入可能不同输出（LLM 概率性） |
+| 错误处理 | 报错退出，人类决定下一步 | Agent 看到错误后自主修正 |
+| 状态管理 | 通常无状态或简单状态 | 维护完整对话上下文 |
+| 工具使用 | 固定的子命令集 | 运行时动态选择工具 |
+| 终止条件 | 命令执行完毕即退出 | Agent 自主判断任务是否完成 |
 
-`route_prompt` 是 Agent 的"感知-路由"入口。它先做显式命令匹配（例如用户输入以 `/` 开头的命令），然后对剩余 token 在命令和工具两个维度上做模糊匹配，最终返回一个按相关性排序的 `RoutedMatch` 列表。每个 `RoutedMatch` 包含 kind（command 或 tool）、name、source_hint 和 score。
+传统 CLI 的控制流在编译时就确定了。`git commit` 会执行 add → write tree → commit → update ref 这条固定链路，不会因为上下文不同而走不同路径。
 
-```python
-# claw-code/src/runtime.py
+Agent CLI 的控制流在运行时由 LLM 动态决定。同样是"帮我修个 bug"，Agent 可能先读日志、也可能先读代码、也可能先问澄清问题，取决于 LLM 对当前上下文的判断。
 
-@dataclass(frozen=True)
-class RoutedMatch:
-    kind: str
-    name: str
-    source_hint: str
-    score: int
-```
+## 1.3 claw-code 的 Agent 特征
 
-匹配完成后，`bootstrap_session` 将这些结果组装为一个 `RuntimeSession`，其中包含上下文、历史记录、工具执行结果和 Turn 输出。这个会话对象就是 Agent 在一次交互中的完整状态快照。
+claw-code 具备以下 Agent 核心能力，每项对应后续章节的源码分析：
 
-## 1.3 Turn Loop：Agent 的心跳
+| Agent 能力 | 作用 | 对应章节 |
+| --- | --- | --- |
+| 启动与初始化 | 加载配置、注册工具、构建系统提示词 | 第4章 |
+| 工具调用 | 读写文件、执行命令、搜索代码 | 第5章 |
+| 多轮交互（Turn Loop） | LLM 循环决策，调用工具，观察结果 | 第6章 |
+| 权限控制 | 限制 Agent 能操作的文件和命令范围 | 第7章 |
+| 钩子系统 | 在关键节点插入前置/后置处理 | 第8章 |
+| 会话管理 | 维护对话历史，支持恢复和压缩 | 第9章 |
+| 多 Agent 协调 | 任务拆分、并行执行、结果合并 | 第10章 |
+| 插件与命令扩展 | 用户自定义工具和工作流 | 第11章 |
 
-`run_turn_loop` 是 Agent 的核心循环方法，它将一次用户请求拆分为多个 turn，直到任务完成或触达资源上限。
+这些能力不是独立的功能模块，而是一条完整的执行链。从用户输入到最终输出，数据依次流经启动初始化、工具注册、Turn Loop 循环、权限检查、会话存储，最终返回结果。
 
-```python
-# claw-code/src/runtime.py
+## 1.4 Agent 的执行循环
 
-def run_turn_loop(self, prompt: str, limit: int = 5, max_turns: int = 3, structured_output: bool = False) -> list[TurnResult]:
-    engine = QueryEnginePort.from_workspace()
-    engine.config = QueryEngineConfig(max_turns=max_turns, structured_output=structured_output)
-    matches = self.route_prompt(prompt, limit=limit)
-    command_names = tuple(match.name for match in matches if match.kind == 'command')
-    tool_names = tuple(match.name for match in matches if match.kind == 'tool')
-    results: list[TurnResult] = []
-    for turn in range(max_turns):
-        turn_prompt = prompt if turn == 0 else f'{prompt} [turn {turn + 1}]'
-        result = engine.submit_message(turn_prompt, command_names, tool_names, ())
-        results.append(result)
-        if result.stop_reason != 'completed':
-            break
-    return results
-```
-
-循环逻辑很直接：初始化引擎，路由匹配，然后逐 turn 提交消息。每个 turn 的 stop_reason 被检查，如果不是 `completed`，循环立即终止。`max_turns` 参数在循环层面做硬限制，而 `QueryEngineConfig` 中还有更细粒度的 token 预算限制。
+Agent 的核心是 Turn Loop——一个"感知-决策-执行-观察"的循环：
 
 ```mermaid
 graph TD
-    A[用户输入 prompt] --> B[route_prompt 路由匹配]
-    B --> C{显式命令?}
-    C -->|是| D[精确匹配命令]
-    C -->|否| E[模糊匹配命令和工具]
-    D --> F[组装 command_names 和 tool_names]
-    E --> F
-    F --> G[初始化 QueryEnginePort]
-    G --> H{turn < max_turns?}
-    H -->|是| I[submit_message 提交 turn]
-    I --> J{stop_reason == completed?}
-    J -->|否| K[终止循环]
-    J -->|是| H
-    H -->|否| L[返回所有 TurnResult]
+    A[用户输入] --> B[LLM 决策]
+    B --> C{需要调用工具?}
+    C -->|是| D[执行工具]
+    D --> E[将结果反馈给 LLM]
+    E --> B
+    C -->|否| F[输出最终结果]
+    F --> G[等待下一次输入]
+    G --> A
 ```
 
-## 1.4 工具与命令：Agent 的可用能力
+这个循环和 Java 后端开发者熟悉的请求-响应模式有本质区别。Spring MVC 的 `DispatcherServlet` 处理完一个 HTTP 请求就结束了，下一个请求是新的一次处理。Agent 的 Turn Loop 在 LLM 调用工具后不会结束，而是把工具结果喂回 LLM，让 LLM 决定是否继续调用更多工具。
 
-Agent 的决策能力取决于它拥有哪些可执行能力。claw-code 将原版 TypeScript 的命令和工具表面抽象为 `PortingModule` 镜像，存储在 JSON 快照中。
+循环的终止不是"代码执行完毕"，而是"LLM 认为任务完成了"。这个判断由 LLM 自主做出，人类不干预每一步的决策。
 
-```python
-# claw-code/src/models.py
+## 1.5 为什么 Java 工程师需要理解 Agent
 
-@dataclass(frozen=True)
-class PortingModule:
-    name: str
-    responsibility: str
-    source_hint: str
-    status: str = 'planned'
-```
+Java 后端工程师已经熟悉一套成熟的工程范式：Spring Boot 管理依赖注入和生命周期，MVC 处理请求路由，MyBatis 管理数据持久化，Maven 管理构建。这些范式的共同特征是确定性——相同的配置产生相同的行为。
 
-`tools.py` 和 `commands.py` 分别加载对应的快照，提供查找和匹配接口。以工具为例：
+Agent 系统引入了一个根本性的变化：控制流由概率模型（LLM）驱动。这意味着：
 
-```python
-# claw-code/src/tools.py
+系统行为不可预测：同一个输入可能产生不同的执行路径。传统软件的测试方法论（断言精确输出）不能直接套用。
 
-@lru_cache(maxsize=1)
-def load_tool_snapshot() -> tuple[PortingModule, ...]:
-    raw_entries = json.loads(SNAPSHOT_PATH.read_text())
-    return tuple(
-        PortingModule(
-            name=entry['name'],
-            responsibility=entry['responsibility'],
-            source_hint=entry['source_hint'],
-            status='mirrored',
-        )
-        for entry in raw_entries
-    )
+工具选择是动态的：Spring 的 `@Autowired` 在编译时确定依赖关系。Agent 的工具池在启动时注册所有工具，但具体调用哪个工具由 LLM 在运行时决定。
 
-PORTED_TOOLS = load_tool_snapshot()
-```
+状态管理面临新挑战：传统后端的状态持久化在数据库中，按需查询。Agent 的状态是完整的对话历史，每次调用 LLM 都要全量发送，受 Token 窗口限制。
 
-`PORTED_TOOLS` 和 `PORTED_COMMANDS` 是两个全局镜像列表，被 `PortRuntime.route_prompt` 用作匹配库。`execute_tool` 和 `execute_command` 提供模拟执行接口，实际处理逻辑由调用方提供。在 Python 移植版本中，这些工具目前处于"镜像"状态，即记录存在但执行体由外部框架接管。
+权限模型需要重新设计：Spring Security 用注解在编译时声明权限规则。Agent 的权限需要运行时动态检查，因为工具调用是 LLM 运行时决定的，事先不知道会调用什么。
 
-## 1.5 资源预算与权限控制
-
-Agent 不能无限制运行。`QueryEngineConfig` 定义了三层资源约束：
-
-```python
-# claw-code/src/query_engine.py
-
-@dataclass(frozen=True)
-class QueryEngineConfig:
-    max_turns: int = 8
-    max_budget_tokens: int = 2000
-    compact_after_turns: int = 12
-    structured_output: bool = False
-    structured_retry_limit: int = 2
-```
-
-`max_turns` 限制单次请求的最大 turn 数，`max_budget_tokens` 限制累计 token 消耗，`compact_after_turns` 触发历史消息压缩。`submit_message` 在每个 turn 结束时检查预算：
-
-```python
-# claw-code/src/query_engine.py
-
-projected_usage = self.total_usage.add_turn(prompt, output)
-stop_reason = 'completed'
-if projected_usage.input_tokens + projected_usage.output_tokens > self.config.max_budget_tokens:
-    stop_reason = 'max_budget_reached'
-```
-
-权限控制通过 `PermissionDenial` 实现。`PortRuntime._infer_permission_denials` 会对高危工具（如包含 bash 的工具）自动拒绝，并返回拒绝原因。
-
-```python
-# claw-code/src/runtime.py
-
-def _infer_permission_denials(self, matches: list[RoutedMatch]) -> list[PermissionDenial]:
-    denials: list[PermissionDenial] = []
-    for match in matches:
-        if match.kind == 'tool' and 'bash' in match.name.lower():
-            denials.append(PermissionDenial(
-                tool_name=match.name,
-                reason='destructive shell execution remains gated in the Python port'
-            ))
-    return denials
-```
-
-## 1.6 设计对比
-
-将 claw-code 的 Agent 模型与 Java 生态做映射，有助于理解其架构定位。
-
-| claw-code 概念 | Java 生态对应 |
-| --- | --- |
-| `PortRuntime` | `ApplicationContext` 运行时容器 |
-| `QueryEnginePort` | `DispatcherServlet` 请求调度器 |
-| `Turn Loop` | 同步请求处理循环 |
-| `RoutedMatch` | `HandlerMapping` 匹配结果 |
-| `QueryEngineConfig` | `application.properties` 配置约束 |
-| `PermissionDenial` | `Spring Security` 访问控制决策 |
-
-`PortRuntime` 类似 Spring Boot 的 `ApplicationContext`，它持有所有命令和工具的镜像注册表，并在启动时初始化运行环境。`QueryEnginePort` 类似 `DispatcherServlet`，负责将输入分发到合适的处理流程。两者的区别在于：Spring 处理的是 HTTP 请求，claw-code 处理的是自然语言 prompt，且每个请求内部可能包含多个 turn。
+这些差异不意味着 Java 工程师的经验失效，而是意味着需要把已有的架构思维（分层、解耦、权限、状态管理）迁移到新的执行模型上。后续章节会逐步展示 claw-code 如何在 Agent 架构中实现这些熟悉的关注点。
 
 ## 小结
 
-`PortRuntime` 和 `QueryEnginePort` 共同构成了 claw-code Agent 的核心骨架。`PortRuntime` 负责输入路由和工具/命令匹配，`QueryEnginePort` 负责 turn 管理、资源预算和会话持久化。`TurnResult` 记录了每个 turn 的完整状态，包括命令匹配、工具匹配、权限拦截和停止原因。工具与命令以 `PortingModule` 镜像的形式注册在全局快照中，权限控制通过 `PermissionDenial` 在运行时拦截高危操作。下一章将介绍 LLM 的最小必要知识，这是理解 Agent 如何"思考"的基础。
+Agent 是一个自主感知-决策-执行-观察的闭环系统，与传统 CLI 的固定命令执行有本质区别。claw-code 具备启动初始化、工具调用、Turn Loop、权限控制、钩子、会话管理、多 Agent 协调和插件扩展八项核心能力。对于 Java 工程师，理解 Agent 的关键是接受控制流由 LLM 动态驱动这一前提。
+
+下一章将展示 claw-code 的整体架构——两套并行实现（Python 移植版和 Rust 重写版）的模块布局，以及各模块之间的数据流关系。

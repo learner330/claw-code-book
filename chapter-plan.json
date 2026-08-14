@@ -14,7 +14,7 @@
     },
     {
       "number": 1,
-      "title": "什么是 Agent",
+      "title": "什么是 Agent：Agent 与传统 CLI 的本质区别",
       "km_doc_id": "2754327855",
       "source_files": [
         "src/runtime.py",
@@ -26,18 +26,7 @@
     },
     {
       "number": 2,
-      "title": "LLM 最小必要知识",
-      "km_doc_id": "2754328027",
-      "source_files": [
-        "src/models.py",
-        "rust/crates/api/src/"
-      ],
-      "output_path": "chapter-02/llm-basics.md",
-      "status": "done"
-    },
-    {
-      "number": 3,
-      "title": "整体架构全景",
+      "title": "整体架构全景：模块地图与数据流",
       "km_doc_id": "2754827466",
       "source_files": [
         "src/main.py",
@@ -46,12 +35,26 @@
         "src/bootstrap_graph.py",
         "rust/crates/runtime/src/lib.rs"
       ],
+      "output_path": "chapter-02/architecture.md",
+      "status": "done"
+    },
+    {
+      "number": 3,
+      "title": "启动到第一条消息：端到端流程概述",
+      "km_doc_id": "2754537617",
+      "source_files": [
+        "rust/crates/rusty-claude-cli/src/main.rs",
+        "rust/crates/runtime/src/config.rs",
+        "rust/crates/runtime/src/conversation.rs",
+        "rust/crates/api/src/client.rs",
+        "src/bootstrap_graph.py"
+      ],
       "output_path": "chapter-03/architecture.md",
       "status": "done"
     },
     {
       "number": 4,
-      "title": "启动流程深度解析",
+      "title": "启动流程深度解析：Bootstrap 七阶段",
       "km_doc_id": "2754537617",
       "source_files": [
         "src/main.py",
@@ -66,7 +69,7 @@
     },
     {
       "number": 5,
-      "title": "工具系统",
+      "title": "工具系统：ToolPool 与工具注册",
       "km_doc_id": "2754797138",
       "source_files": [
         "src/Tool.py",
@@ -79,7 +82,7 @@
     },
     {
       "number": 6,
-      "title": "查询引擎与 Turn Loop",
+      "title": "Turn Loop：查询引擎与多轮交互",
       "km_doc_id": "2754297997",
       "source_files": [
         "src/query_engine.py",
@@ -92,7 +95,7 @@
     },
     {
       "number": 7,
-      "title": "权限系统",
+      "title": "权限系统：PolicyEngine 与路径检查",
       "km_doc_id": "2754337746",
       "source_files": [
         "src/permissions.py",
@@ -105,7 +108,7 @@
     },
     {
       "number": 8,
-      "title": "钩子系统",
+      "title": "钩子系统：Hook 注册与生命周期",
       "km_doc_id": "2754857217",
       "source_files": [
         "src/hooks/",
@@ -116,7 +119,7 @@
     },
     {
       "number": 9,
-      "title": "状态机与会话管理",
+      "title": "会话管理：状态机与消息历史",
       "km_doc_id": "2754397994",
       "source_files": [
         "src/state/",
@@ -129,7 +132,7 @@
     },
     {
       "number": 10,
-      "title": "协调器：多 Agent 编排",
+      "title": "协调器：TaskRegistry 与多 Agent 编排",
       "km_doc_id": "2754258146",
       "source_files": [
         "src/coordinator/__init__.py",
@@ -142,7 +145,7 @@
     },
     {
       "number": 11,
-      "title": "插件系统与命令扩展",
+      "title": "插件与命令扩展",
       "km_doc_id": "2754737259",
       "source_files": [
         "src/plugins/__init__.py",
@@ -156,7 +159,7 @@
     },
     {
       "number": 12,
-      "title": "Rust 重构版深度解读",
+      "title": "Rust 重构版深度解读：runtime crate 全景",
       "km_doc_id": "2754947156",
       "source_files": [
         "rust/crates/runtime/src/",
@@ -168,7 +171,7 @@
     },
     {
       "number": 13,
-      "title": "TypeScript 原版 vs Python/Rust 重写版对比",
+      "title": "TypeScript vs Python/Rust 对比",
       "km_doc_id": "2754757683",
       "source_files": [
         "src/native_ts/",
