@@ -705,7 +705,7 @@ pub enum TrustResolution {
 
 ## 8.5 PolicyEngine：Lane 工作流策略
 
-`policy_engine.rs` 为 Lane 工作流（第11章展开）提供策略规则引擎：
+`policy_engine.rs` 为 Lane 工作流（第12章展开）提供策略规则引擎：
 
 ```rust
 // claw-code/rust/crates/runtime/src/policy_engine.rs
@@ -807,4 +807,4 @@ pub enum PolicyAction {
 | `rust/crates/runtime/src/trust_resolver.rs` | `TrustPolicy`、`TrustAllowlistEntry` | 8.4 |
 | `rust/crates/runtime/src/policy_engine.rs` | `PolicyRule`、`PolicyCondition`、`PolicyAction` | 8.5 |
 
-下一章将分析钩子系统——`HookRunner` 如何在工具执行前后插入用户自定义逻辑，PreToolUse 和 PostToolUse 钩子如何修改输入、覆盖权限和追加反馈。
+下一章将分析会话管理——`Session` 结构如何存储对话历史，`ContentBlock` 枚举如何表示消息内容，以及 `compact_session` 如何在 token 超限前压缩历史。

@@ -1,4 +1,4 @@
-# 第12章 MCP 协议与插件扩展：McpToolRegistry 与 Lifecycle
+# 第7章 MCP 协议与插件扩展：McpToolRegistry 与 Lifecycle
 
 ## 本章概览
 
@@ -13,7 +13,7 @@ MCP 协议解决的核心问题是：Agent 需要与外部工具和数据源交�
 | `rust/crates/runtime/src/mcp_client.rs` | 传输层抽象（stdio、SSE、HTTP、WebSocket） |
 | `rust/crates/plugins/src/lib.rs` | 插件元数据、插件钩子、加载机制 |
 
-## 12.1 MCP 协议基础：JSON-RPC 2.0
+## 7.1 MCP 协议基础：JSON-RPC 2.0
 
 MCP 基于 JSON-RPC 2.0 协议。`mcp_stdio.rs` 定义了基本的消息结构：
 
@@ -155,7 +155,7 @@ pub struct McpResourceContents {
 
 `resources/list` 返回资源列表，`resources/read` 读取资源内容。资源用 URI 标识，支持文本（`text`）和二进制（`blob`）两种格式。
 
-## 12.2 McpClientTransport：传输层抽象
+## 7.2 McpClientTransport：传输层抽象
 
 `mcp_client.rs` 抽象了多种传输方式：
 
@@ -261,7 +261,7 @@ impl McpClientTransport {
 
 `match` 穷举所有配置类型——编译器保证每个 `McpServerConfig` 变体都有处理分支。`clone()` 深拷贝数据——配置值在构建后不再需要，但传输层需要独立持有。
 
-## 12.3 McpServerManager：生命周期管理
+## 7.3 McpServerManager：生命周期管理
 
 `McpServerManager` 管理 MCP 服务器的完整生命周期：
 
@@ -462,7 +462,7 @@ fn lifecycle_phase_for_method(method: &str) -> McpLifecyclePhase {
 
 错误按生命周期阶段分类：`SpawnConnect`、`InitializeHandshake`、`ToolDiscovery`、`ResourceDiscovery`、`Invocation`、`ErrorSurfacing`。`recoverable` 判断错误是否可恢复——初始化握手失败不可恢复（服务器根本不支持 MCP），传输错误和超时在初始化后可恢复（可能网络抖动）。
 
-## 12.4 McpToolRegistry：桥接工具系统
+## 7.4 McpToolRegistry：桥接工具系统
 
 `McpToolRegistry` 是 MCP 服务器状态的外部接口，供工具系统查询：
 
@@ -584,7 +584,7 @@ pub enum McpConnectionStatus {
 
 `spawn_tool_call` 在新线程中运行 tokio 异步运行时——因为 `McpServerManager` 的方法是 `async`，而工具调用来自同步的工具执行上下文。`new_current_thread()` 创建单线程运行时，适合 IO 密集型 MCP 调用。`block_on` 阻塞直到异步完成。`join_handle.join()` 等待线程结束，处理 panic payload（`downcast_ref` 尝试转换为 `&str` 或 `String`）。
 
-## 12.5 插件系统：PluginMetadata 与 PluginHooks
+## 7.5 插件系统：PluginMetadata 与 PluginHooks
 
 `plugins` crate 定义了插件的元数据和钩子：
 
@@ -615,7 +615,7 @@ pub struct PluginHooks {
 }
 ```
 
-`PluginKind` 区分三种来源：`Builtin` 内置插件（编译进二进制）、`Bundled` 捆绑插件（随安装包分发）、`External` 外部插件（从市场安装）。`PluginMetadata` 包含插件的基本信息。`PluginHooks` 定义插件提供的钩子命令——与第9章的钩子系统对应，`PluginHooks` 的数据被合并到 `RuntimeHookConfig` 中。
+`PluginKind` 区分三种来源：`Builtin` 内置插件（编译进二进制）、`Bundled` 捆绑插件（随安装包分发）、`External` 外部插件（从市场安装）。`PluginMetadata` 包含插件的基本信息。`PluginHooks` 定义插件提供的钩子命令——与第10章的钩子系统对应，`PluginHooks` 的数据被合并到 `RuntimeHookConfig` 中。
 
 `PluginHooks` 的合并：
 
@@ -633,9 +633,9 @@ impl PluginHooks {
 }
 ```
 
-`merged_with` 合并两个插件的钩子列表——简单追加。这意味着多个插件可以注册同一阶段的钩子，按顺序执行。与第9章的 `HookRunner` 对应——`HookRunner` 按 `commands` 列表顺序执行，插件钩子被追加到列表末尾。
+`merged_with` 合并两个插件的钩子列表——简单追加。这意味着多个插件可以注册同一阶段的钩子，按顺序执行。与第10章的 `HookRunner` 对应——`HookRunner` 按 `commands` 列表顺序执行，插件钩子被追加到列表末尾。
 
-## 12.6 降级启动与韧性
+## 7.6 降级启动与韧性
 
 MCP 系统实现了降级启动——部分服务器失败时 Agent 仍然可用：
 
@@ -682,9 +682,9 @@ MCP 系统在 Rust 端以 `McpServerManager`（`mcp_stdio.rs`）管理 MCP 服�
 
 | 关键文件 | 核心机制 | 对应章节 |
 | --- | --- | --- |
-| `rust/crates/runtime/src/mcp_stdio.rs` | `McpServerManager`、JSON-RPC 2.0、生命周期、降级启动 | 12.1, 12.3, 12.6 |
-| `rust/crates/runtime/src/mcp_client.rs` | `McpClientTransport` 六种传输方式、`McpClientBootstrap` | 12.2 |
-| `rust/crates/runtime/src/mcp_tool_bridge.rs` | `McpToolRegistry` 状态注册、`spawn_tool_call` 线程隔离 | 12.4 |
-| `rust/crates/plugins/src/lib.rs` | `PluginMetadata`、`PluginHooks`、合并策略 | 12.5 |
+| `rust/crates/runtime/src/mcp_stdio.rs` | `McpServerManager`、JSON-RPC 2.0、生命周期、降级启动 | 7.1, 7.3, 7.6 |
+| `rust/crates/runtime/src/mcp_client.rs` | `McpClientTransport` 六种传输方式、`McpClientBootstrap` | 7.2 |
+| `rust/crates/runtime/src/mcp_tool_bridge.rs` | `McpToolRegistry` 状态注册、`spawn_tool_call` 线程隔离 | 7.4 |
+| `rust/crates/plugins/src/lib.rs` | `PluginMetadata`、`PluginHooks`、合并策略 | 7.5 |
 
-下一章将分析测试与质量保障——`MockParityHarness` 如何模拟 Anthropic 服务，`compat-harness` 如何做跨版本兼容性验证，以及 `run_mock_parity_harness.sh` 脚本如何端到端验证行为一致性。
+下一章将分析权限系统与操作边界——`PermissionMode` 如何分级控制文件访问、`PermissionEnforcer` 如何做读写判定、以及用户如何通过 `claw permission` 命令调整权限边界。

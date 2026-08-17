@@ -1,4 +1,4 @@
-# 第11章 协调器：TaskRegistry 与 Team/Cron 编排
+# 第12章 协调器：TaskRegistry 与 Team/Cron 编排
 
 ## 本章概览
 
@@ -11,7 +11,7 @@
 | `rust/crates/runtime/src/task_registry.rs` | `TaskRegistry` 任务生命周期、`LaneBoard` 状态看板 |
 | `rust/crates/runtime/src/team_cron_registry.rs` | `TeamRegistry` 团队管理、`CronRegistry` 定时任务 |
 
-## 11.1 任务注册表：TaskRegistry
+## 12.1 任务注册表：TaskRegistry
 
 ### 任务状态模型
 
@@ -261,7 +261,7 @@ pub struct LaneBoardEntry {
 
 `stop` 检查终端状态——已完成或失败的任务不能被停止。`set_status` 直接设置状态（不检查转换合法性）。`assign_team` 把任务关联到团队。所有操作都更新 `updated_at` 时间戳。
 
-## 11.2 团队注册表：TeamRegistry
+## 12.2 团队注册表：TeamRegistry
 
 `TeamRegistry` 管理任务分组：
 
@@ -347,7 +347,7 @@ impl TeamRegistry {
 
 `delete` 是软删除——标记状态为 `Deleted` 但不从 `HashMap` 移除。`remove` 是硬删除——从 `HashMap` 移除。软删除保留历史记录，硬删除释放内存。`get` 和 `list` 返回 `cloned()` 副本——调用方获得独立的数据拷贝，不会持有锁。
 
-## 11.3 定时注册表：CronRegistry
+## 12.3 定时注册表：CronRegistry
 
 `CronRegistry` 管理周期性任务：
 
@@ -418,7 +418,7 @@ impl CronRegistry {
 
 `CronRegistry` 本身不实现调度器——它只存储条目和记录执行。实际调度由外部系统（如操作系统 cron 或内部调度器）触发。`record_run` 在每次执行后调用，更新 `last_run_at` 和 `run_count`。这种设计把调度逻辑与状态存储分离——调度器可以独立实现，注册表只提供状态查询和更新接口。
 
-## 11.4 全局注册表与工具集成
+## 12.4 全局注册表与工具集成
 
 三个注册表在 `tools` crate 中通过 `OnceLock` 提供全局访问：
 
@@ -473,8 +473,8 @@ fn global_cron_registry() -> &'static CronRegistry {
 
 | 关键文件 | 核心机制 | 对应章节 |
 | --- | --- | --- |
-| `rust/crates/runtime/src/task_registry.rs` | `TaskRegistry`、`TaskStatus`、`LaneBoard`、`LaneHeartbeat` | 11.1 |
-| `rust/crates/runtime/src/team_cron_registry.rs` | `TeamRegistry`、`CronRegistry`、软删除/硬删除 | 11.2-11.3 |
-| `rust/crates/tools/src/lib.rs` | 全局 `OnceLock` 注册表、工具集成 | 11.4 |
+| `rust/crates/runtime/src/task_registry.rs` | `TaskRegistry`、`TaskStatus`、`LaneBoard`、`LaneHeartbeat` | 12.1 |
+| `rust/crates/runtime/src/team_cron_registry.rs` | `TeamRegistry`、`CronRegistry`、软删除/硬删除 | 12.2-12.3 |
+| `rust/crates/tools/src/lib.rs` | 全局 `OnceLock` 注册表、工具集成 | 12.4 |
 
-下一章将分析 MCP 协议与插件扩展——`McpToolRegistry` 如何对接外部 MCP 服务器，`McpToolBridge` 如何转换工具规范，以及插件生命周期管理。
+下一章将分析测试与质量保障——`MockParityHarness` 如何模拟 Anthropic 服务，`compat-harness` 如何做跨版本兼容性验证，以及 `run_mock_parity_harness.sh` 脚本如何端到端验证行为一致性。

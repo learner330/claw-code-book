@@ -645,4 +645,4 @@ claw-code 的启动流程从 CLI 入口到 Turn Loop 分为多个阶段。CLI �
 | `runtime/src/config.rs` | `ConfigLoader`，三层合并，`ConfigFileReport` | 本章 3.4 |
 | `rusty-claude-cli/src/main.rs` | `ModelProvenance`，`PermissionModeProvenance` | 本章 3.5 |
 
-下一章将分析 API 通信与模型交互——claw-code 如何与 LLM 建立 SSE 流式连接，以及如何实现多 provider 路由。
+下一章将分析配置系统——`ConfigLoader` 如何发现三层配置文件、`deep_merge_objects` 如何递归合并、以及合并后的配置如何成为各子系统的运行时契约。

@@ -1,4 +1,4 @@
-# 第9章 钩子系统：用户自定义拦截
+# 第10章 钩子系统：用户自定义拦截
 
 ## 本章概览
 
@@ -11,7 +11,7 @@
 | `rust/crates/runtime/src/hooks.rs` | `HookRunner`、命令执行、输出解析、取消信号 |
 | `rust/crates/runtime/src/config.rs` | `RuntimeHookConfig`、`RuntimeHookCommand`、matcher 配置 |
 
-## 9.1 Hook 生命周期：三个事件
+## 10.1 Hook 生命周期：三个事件
 
 Rust 端定义三个钩子事件，覆盖工具执行的全生命周期：
 
@@ -46,7 +46,7 @@ pub struct RuntimeHookConfig {
 
 `pre_tool_use`、`post_tool_use`、`post_tool_use_failure` 分别存储三个阶段的命令。`invalid_hooks` 记录配置解析失败的钩子，用于错误报告而不中断启动。
 
-## 9.2 HookRunner：命令执行流水线
+## 10.2 HookRunner：命令执行流水线
 
 `HookRunner` 是钩子系统的执行引擎：
 
@@ -165,7 +165,7 @@ PostToolUse 和 PostToolUseFailure 的结构类似，只是 `tool_output` 为 `S
 
 `merge_parsed_hook_output` 把多个命令的结果合并到一个 `HookRunResult`：消息追加到列表，权限覆盖和输入修改取最后一个非空值。
 
-## 9.3 钩子命令执行：进程与协议
+## 10.3 钩子命令执行：进程与协议
 
 ### 子进程启动
 
@@ -276,7 +276,7 @@ fn hook_payload(
 
 `parse_tool_input` 尝试把工具输入解析为 JSON——如果成功，payload 中的 `tool_input` 是结构化对象；如果失败，是 `{"raw": "..."}`。`tool_input_json` 始终保留原始字符串。
 
-## 9.4 输出解析：JSON 协议
+## 10.4 输出解析：JSON 协议
 
 钩子通过 stdout 返回结构化输出。`parse_hook_output` 解析 stdout 为 `ParsedHookOutput`：
 
@@ -366,7 +366,7 @@ fn parse_hook_output(
 
 `permissionDecision` 映射为 `PermissionOverride` 枚举——`allow`、`deny`、`ask` 对应权限系统的三种覆盖。`updatedInput` 是修改后的工具输入，必须是有效的 JSON 值，会被序列化为字符串后替换原始输入。
 
-## 9.5 权限覆盖与输入修改
+## 10.5 权限覆盖与输入修改
 
 钩子系统与权限系统通过 `PermissionOverride` 交互。`HookRunResult` 携带权限覆盖：
 
@@ -412,7 +412,7 @@ pub struct HookRunResult {
 
 如果钩子返回 `updated_input`，用它替换原始输入；否则用原始输入。注意：修改后的输入仍然要经过权限检查——钩子不能绕过权限系统。
 
-## 9.6 工具匹配与通配符
+## 10.6 工具匹配与通配符
 
 `RuntimeHookCommand` 支持工具匹配器——只让钩子作用于特定工具：
 
@@ -508,7 +508,7 @@ fn wildcard_match(pattern: &str, value: &str) -> bool {
 
 三个命令——`legacy`（无 matcher，匹配所有）、`bash only`（matcher `Bash`）、`read only`（matcher `Read*`）——`ReadFile` 匹配 `legacy` 和 `read only`，`Bash` 匹配 `legacy` 和 `bash only`。
 
-## 9.7 取消信号与进度报告
+## 10.7 取消信号与进度报告
 
 ### HookAbortSignal
 
@@ -582,7 +582,7 @@ CLI 前端实现这个 trait，在 `Started` 时显示钩子执行信息，在 `
 
 | 关键文件 | 核心机制 | 对应章节 |
 | --- | --- | --- |
-| `rust/crates/runtime/src/hooks.rs` | `HookRunner`、命令执行、输出解析、取消信号 | 9.1-9.7 |
-| `rust/crates/runtime/src/config.rs` | `RuntimeHookConfig`、`RuntimeHookCommand`、matcher 配置 | 9.6 |
+| `rust/crates/runtime/src/hooks.rs` | `HookRunner`、命令执行、输出解析、取消信号 | 10.1-10.7 |
+| `rust/crates/runtime/src/config.rs` | `RuntimeHookConfig`、`RuntimeHookCommand`、matcher 配置 | 10.6 |
 
-下一章将分析会话管理——`Session` 结构如何存储对话历史，`ContentBlock` 枚举如何表示消息内容，以及 `compact_session` 如何在 token 超限前压缩历史。
+下一章将分析 Turn Loop 与对话引擎——`ConversationRuntime` 如何循环调用模型和工具，`run_turn` 如何组装请求和解析 SSE 流，以及 `build_assistant_message` 如何从流式事件构建助手消息。

@@ -8,12 +8,12 @@
 
 | 关键文件 | 职责 | 对应节 |
 | --- | --- | --- |
-| `rust/crates/runtime/src/config.rs` | `RuntimeFeatureConfig` 类型化视图、字段解析 | 16.1 |
-| `rust/crates/runtime/src/policy_engine.rs` | `PolicyEngine` 条件-动作规则评估 | 16.2 |
-| `rust/crates/runtime/src/prompt.rs` | `RulesImportConfig` 框架规则发现 | 16.3 |
-| `rust/crates/commands/src/lib.rs` | Skills 发现、`SlashCommand` 解析分发 | 16.4-16.5 |
+| `rust/crates/runtime/src/config.rs` | `RuntimeFeatureConfig` 类型化视图、字段解析 | 4.1 |
+| `rust/crates/runtime/src/policy_engine.rs` | `PolicyEngine` 条件-动作规则评估 | 4.2 |
+| `rust/crates/runtime/src/prompt.rs` | `RulesImportConfig` 框架规则发现 | 4.3 |
+| `rust/crates/commands/src/lib.rs` | Skills 发现、`SlashCommand` 解析分发 | 4.4-4.5 |
 
-## 16.1 配置契约：RuntimeFeatureConfig
+## 4.1 配置契约：RuntimeFeatureConfig
 
 `ConfigLoader` 把多来源的 JSON 合并为统一的 `BTreeMap<String, JsonValue>` 后，`RuntimeConfig` 通过 `RuntimeFeatureConfig` 把这个扁平映射解析为子系统专用的类型化配置视图：
 
@@ -69,7 +69,7 @@ impl RuntimeConfig {
 
 配置校验也在这个边界上发生。`config_validate.rs` 在合并后的 JSON 上运行，检测未知键、类型错误和已弃用字段。校验结果分为 `errors`（阻止启动）和 `warnings`（允许启动但提示）。这个分层保证了无效配置不会进入 `RuntimeFeatureConfig` 的解析阶段。
 
-## 16.2 PolicyEngine：Lane 工作流规则引擎
+## 4.2 PolicyEngine：Lane 工作流规则引擎
 
 `PolicyEngine` 是配置层中尚未在前序章节分析的独立规则系统。它与第8章的 `PermissionPolicy` 不同——`PermissionPolicy` 评估单次工具调用的授权，`PolicyEngine` 评估 Lane（工作流分支）的生命周期状态并决定自动化动作。
 
@@ -238,7 +238,7 @@ pub fn evaluate_with_events(engine: &PolicyEngine, context: &LaneContext) -> Pol
 
 `PolicyEngine` 与第11章的 `TaskRegistry` 和 `LaneBoard` 协同工作——`LaneBoard` 提供状态可视化，`TaskRegistry` 管理 Lane 生命周期，`PolicyEngine` 提供自动化决策。三者构成"状态-规则-动作"的闭环：Lane 状态变化 → PolicyEngine 评估 → 生成动作 → 执行动作 → 状态再次变化。
 
-## 16.3 Rules Import：跨框架规则兼容性
+## 4.3 Rules Import：跨框架规则兼容性
 
 `RulesImportConfig` 控制是否导入外部 AI 编程框架的规则文件（如 Cursor、GitHub Copilot、Windsurf 等）。这个配置项解决的是生态兼容问题——不同团队可能使用不同的 AI 工具，claw-code 需要能读取其他工具的配置规则而不强制迁移。
 
@@ -317,7 +317,7 @@ fn push_framework_imports(
 
 `RulesImportConfig` 在 `RuntimeFeatureConfig` 中的位置表明它是系统提示构建的一部分（第7章的 `ProjectContext`），而非安全策略的一部分（`permissions`）。区分这两者很重要——规则导入影响的是模型"知道什么"，权限配置影响的是模型"能做什么"。
 
-## 16.4 Skills 系统：发现与集成
+## 4.4 Skills 系统：发现与集成
 
 Skills 是可组合的命令能力单元。与插件（第12章）不同，skills 不通过 `plugin.json` 和生命周期钩子定义，而是通过目录结构和 Markdown  frontmatter 定义，更轻量、更易于分发。
 
@@ -395,7 +395,7 @@ enum SkillInstallSource {
 
 Skills 系统与插件系统（第12章）的关系：skills 是"轻量级命令能力"，插件是"重量级扩展包"。一个插件可以包含多个技能，但技能不依赖插件的生命周期管理。这种分层让简单的命令能力不需要完整的插件基础设施。
 
-## 16.5 Commands 架构：解析与分发
+## 4.5 Commands 架构：解析与分发
 
 第4章当前版本列出了 30 多个 slash 命令的元数据（`SlashCommandSpec`），但这只是静态声明。Commands 架构的核心是解析和分发——如何把用户输入的 `/command args` 转换为运行时可执行的操作。
 
@@ -494,7 +494,7 @@ pub enum SkillSlashDispatch {
 
 ## 小结
 
-配置层的核心不是加载机制（第4章已覆盖），而是合并后的配置如何成为子系统的运行时契约。`RuntimeFeatureConfig` 把扁平 JSON 解析为类型化视图——`hooks`  consumed by `HookRunner`（第9章）、`permission_rules` consumed by `PermissionPolicy`（第8章）、`mcp` consumed by `McpServerManager`（第12章）、`plugins` consumed by plugin lifecycle（第12章）、`rules_import` consumed by prompt builder（第7章）。
+配置层的核心不是加载机制（第4章已覆盖），而是合并后的配置如何成为子系统的运行时契约。`RuntimeFeatureConfig` 把扁平 JSON 解析为类型化视图——`hooks`  consumed by `HookRunner`（第10章）、`permission_rules` consumed by `PermissionPolicy`（第8章）、`mcp` consumed by `McpServerManager`（第7章）、`plugins` consumed by plugin lifecycle（第7章）、`rules_import` consumed by prompt builder（第11章）。
 
 本章展开的三个独特机制：`PolicyEngine` 的 Lane 工作流自动化（条件-动作规则评估、`LaneContext` 状态快照、优先级排序），`RulesImportConfig` 的跨框架规则兼容（Auto/None/List 三种模式、五框架支持），以及 Skills 的发现与集成体系（`SkillCollection` 目录遍历、`SkillSlashDispatch` 调用分发）。
 

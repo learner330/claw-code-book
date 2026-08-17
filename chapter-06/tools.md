@@ -540,4 +540,4 @@ fn maybe_enforce_permission_check_with_mode(
 | `rust/crates/tools/src/lib.rs` | `mvp_tool_specs`、`deferred_tool_specs`、`search_tool_specs` | 6.3 |
 | `rust/crates/tools/src/lib.rs` | `execute_tool_with_enforcer`、`classify_bash_permission` | 6.4 |
 
-下一章将分析 Turn Loop——工具执行完成后，LLM 的响应如何被解析、工具调用如何被触发、多轮对话如何循环。
+下一章将分析 MCP 协议与外部工具连接——`McpToolRegistry` 如何对接外部 MCP 服务器，`McpClientTransport` 如何抽象六种传输方式，以及 `McpServerManager` 如何管理服务器生命周期与降级启动。

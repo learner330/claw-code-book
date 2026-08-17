@@ -27,13 +27,13 @@ claw-code 的 Rust 实现由 10 个 crate 组成，约 9.6 万行代码。核心
 
 `ToolSpec` 的三层注册（第6章）——builtin、plugin、runtime——保证名称唯一性。`classify_bash_permission` 动态分类命令，在运行时调整权限要求。`execute_tool_with_enforcer` 的 `match` 分发在编译时穷举所有工具，添加新工具需要修改此处。
 
-`ConversationRuntime` 泛型结构（第7章）——`C: ApiClient + T: ToolExecutor`——编译期单态化，零虚调用开销。`run_turn` 的无限循环有 `max_iterations` 兜底，防止模型陷入循环。
+`ConversationRuntime` 泛型结构（第11章）——`C: ApiClient + T: ToolExecutor`——编译期单态化，零虚调用开销。`run_turn` 的无限循环有 `max_iterations` 兜底，防止模型陷入循环。
 
 `PermissionMode` 五级偏序模型（第8章）——`ReadOnly < WorkspaceWrite < DangerFullAccess`，加 `Prompt` 和 `Allow`。`PermissionPolicy` 的决策链固定顺序：denied_tools → deny_rules → hook_override → ask_rules → allow_rules → mode_comparison → prompt_or_deny → 默认拒绝。`PermissionEnforcer` 的 `check_file_write` 使用词法路径规范化（不访问文件系统），`check_bash` 使用命令分类（shell 元字符检测 + git 白名单 + 解释器排除）。
 
 `HookRunner` 的三事件生命周期（第10章）——`PreToolUse` 可修改输入和覆盖权限，`PostToolUse` 可追加反馈，`PostToolUseFailure` 可分析错误。退出码 0 成功、2 拒绝、其他非零失败。`RuntimeHookCommand` 的 matcher 支持通配符匹配（逗号/管道分隔多模式，`*` 通配符）。
 
-`Session` 的 JSONL 持久化（第10章）——增量追加写入，原子写入（临时文件 + rename），256 KB 日志轮转。`SessionStore` 按工作区 FNV-1a 指纹隔离存储。`compact_session` 保留最近 4 条消息，边界安全逻辑防止拆分 ToolUse/ToolResult 对。
+`Session` 的 JSONL 持久化（第9章）——增量追加写入，原子写入（临时文件 + rename），256 KB 日志轮转。`SessionStore` 按工作区 FNV-1a 指纹隔离存储。`compact_session` 保留最近 4 条消息，边界安全逻辑防止拆分 ToolUse/ToolResult 对。
 
 `TaskRegistry` 的 `LaneBoard`（第11章）按状态分组任务，心跳检测僵死。`TeamRegistry` 软删除和硬删除。`CronRegistry` 只存储状态不实现调度器。
 
@@ -49,7 +49,7 @@ claw-code 的 Rust 实现由 10 个 crate 组成，约 9.6 万行代码。核心
 
 **词法规范化 vs 系统调用**。`is_within_workspace`（第8章）使用词法路径规范化（折叠 `.` 和 `..`），不访问文件系统。这保证新文件路径也能被正确检查，但无法检测符号链接逃逸。如果攻击者通过符号链接把工作区外的路径映射到工作区内，词法规范化会误判。更高安全需求的环境需要额外的符号链接解析层。
 
-**自动压缩 vs 上下文完整性**。`compact_session`（第10章）保留最近 4 条消息，但 4 这个数字是经验值。如果最近 4 条消息恰好跨越了关键上下文切换（如从需求分析转到实现细节），压缩后的摘要可能丢失上下文线索。`summarize_messages` 生成统计摘要，但统计信息不能替代完整的对话内容。这个权衡没有完美解——token 预算和上下文完整性之间必须取舍。
+**自动压缩 vs 上下文完整性**。`compact_session`（第9章）保留最近 4 条消息，但 4 这个数字是经验值。如果最近 4 条消息恰好跨越了关键上下文切换（如从需求分析转到实现细节），压缩后的摘要可能丢失上下文线索。`summarize_messages` 生成统计摘要，但统计信息不能替代完整的对话内容。这个权衡没有完美解——token 预算和上下文完整性之间必须取舍。
 
 **降级启动 vs 失败快速**。`discover_tools_best_effort`（第7章）在部分 MCP 服务器失败时继续启动。这提高了可用性，但可能导致 Agent 不知道某些工具不可用而尝试调用。`McpDegradedReport` 记录失败服务器，但当前实现没有自动将报告反馈给模型——模型可能仍然尝试调用已失效服务器的工具。
 
@@ -73,7 +73,7 @@ claw-code 的社区扩展内容（本书定位为第二阶段）包括：
 
 claw-code 的终极目标是成为 clawable——一个可以被理解和修改的 Agent 系统。这意味着：
 
-代码可审计。JSONL 会话文件提供完整审计轨迹（第10章）。`HookProgressEvent` 提供钩子执行记录（第10章）。`LaneBoard` 提供任务状态看板（第11章）。这些机制使 Agent 的决策过程透明化，工程师可以事后分析而非黑箱操作。
+代码可审计。JSONL 会话文件提供完整审计轨迹（第9章）。`HookProgressEvent` 提供钩子执行记录（第10章）。`LaneBoard` 提供任务状态看板（第11章）。这些机制使 Agent 的决策过程透明化，工程师可以事后分析而非黑箱操作。
 
 配置可约束。`settings.json` 的权限规则（第8章）、钩子命令（第10章）、MCP 配置（第7章）允许用户定义行为边界。这些约束是声明式的，不需要修改代码就能调整 Agent 的行为策略。
 
@@ -81,7 +81,7 @@ claw-code 的终极目标是成为 clawable——一个可以被理解和修改�
 
 扩展可组合。MCP 协议（第7章）和插件系统（第7章）提供标准扩展接口。新工具通过 MCP 服务器接入，新钩子通过 `settings.json` 配置，新技能通过插件安装。这些扩展机制遵循"可组合契约"的设计原则（第4章）。
 
-代码可修改。全书 19 章覆盖了代码的每个核心模块，从 `main.rs` 的入口到 `session.rs` 的持久化。工程师可以定位任何功能的具体实现，理解设计意图，然后修改或扩展。
+代码可修改。全书 15 章覆盖了代码的每个核心模块，从 `main.rs` 的入口到 `session.rs` 的持久化。工程师可以定位任何功能的具体实现，理解设计意图，然后修改或扩展。
 
 ## 14.5 阅读路径建议
 
@@ -97,7 +97,7 @@ claw-code 的终极目标是成为 clawable——一个可以被理解和修改�
 
 ## 小结
 
-全书 19 章分析了 claw-code 的 Rust 实现——从启动到对话、从工具到权限、从会话到测试。核心架构围绕三个支柱：对话引擎（`ConversationRuntime` 的 Turn Loop）、安全边界（`PermissionPolicy` 的五级模型 + `HookRunner` 的干预机制）、可观测性（`Session` 的 JSONL 持久化 + `LaneBoard` 的任务看板 + `MockParityHarness` 的场景验证）。
+全书 15 章分析了 claw-code 的 Rust 实现——从启动到对话、从工具到权限、从会话到测试。核心架构围绕三个支柱：对话引擎（`ConversationRuntime` 的 Turn Loop）、安全边界（`PermissionPolicy` 的五级模型 + `HookRunner` 的干预机制）、可观测性（`Session` 的 JSONL 持久化 + `LaneBoard` 的任务看板 + `MockParityHarness` 的场景验证）。
 
 code 的演进方向是成为 clawable——可审计、可约束、可验证、可组合、可修改。这一目标不是通过增加功能实现，而是通过保持架构的透明性和模块化实现。每个模块有明确的职责边界、清晰的接口契约、和可观测的行为轨迹。
 
