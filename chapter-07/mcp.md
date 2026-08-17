@@ -615,7 +615,7 @@ pub struct PluginHooks {
 }
 ```
 
-`PluginKind` 区分三种来源：`Builtin` 内置插件（编译进二进制）、`Bundled` 捆绑插件（随安装包分发）、`External` 外部插件（从市场安装）。`PluginMetadata` 包含插件的基本信息。`PluginHooks` 定义插件提供的钩子命令——与第10章的钩子系统对应，`PluginHooks` 的数据被合并到 `RuntimeHookConfig` 中。
+`PluginKind` 区分三种来源：`Builtin` 内置插件（编译进二进制）、`Bundled` 捆绑插件（随安装包分发）、`External` 外部插件（从市场安装）。`PluginMetadata` 包含插件的基本信息。`PluginHooks` 定义插件提供的钩子命令——与第10章的Hooks系统对应，`PluginHooks` 的数据被合并到 `RuntimeHookConfig` 中。
 
 `PluginHooks` 的合并：
 
@@ -672,7 +672,7 @@ pub struct McpDiscoveryFailure {
             });
 ```
 
-如果所有服务器都失败，则完全失败，不是降级启动。如果所有服务器都成功，是正常启动。`McpDegradedReport` 可以被上层（如 CLI 或协调器）消费，决定是否继续执行或通知用户。
+如果所有服务器都失败，则完全失败，不是降级启动。如果所有服务器都成功，是正常启动。`McpDegradedReport` 可以被上层（如 CLI 或任务编排层）消费，决定是否继续执行或通知用户。
 
 ## 小结
 

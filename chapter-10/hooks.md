@@ -1,10 +1,10 @@
-# 第10章 钩子系统：用户自定义拦截
+# 第10章 Hooks系统：用户自定义拦截
 
 ## 本章概览
 
-本章分析 claw-code 的钩子系统——如何在工具执行前后插入用户自定义的 shell 命令，实现对工具调用的拦截、修改和审计。对应 `runtime::hooks` 模块。
+本章分析 claw-code 的Hooks系统——如何在工具执行前后插入用户自定义的 shell 命令，实现对工具调用的拦截、修改和审计。对应 `runtime::hooks` 模块。
 
-钩子系统解决的核心问题是：Agent 自动执行 shell 命令和文件操作，用户可能需要在特定操作执行前做额外检查（如安全扫描），或在执行后追加反馈（如通知、日志）。钩子系统提供三个生命周期事件，每个事件可以配置一组 shell 命令，系统按顺序执行并解析输出。
+Hooks系统解决的核心问题是：Agent 自动执行 shell 命令和文件操作，用户可能需要在特定操作执行前做额外检查（如安全扫描），或在执行后追加反馈（如通知、日志）。Hooks系统提供三个生命周期事件，每个事件可以配置一组 shell 命令，系统按顺序执行并解析输出。
 
 | 关键文件 | 职责 |
 | --- | --- |
@@ -48,7 +48,7 @@ pub struct RuntimeHookConfig {
 
 ## 10.2 HookRunner：命令执行流水线
 
-`HookRunner` 是钩子系统的执行引擎：
+`HookRunner` 是Hooks系统的执行引擎：
 
 ```rust
 // claw-code/rust/crates/runtime/src/hooks.rs
@@ -368,7 +368,7 @@ fn parse_hook_output(
 
 ## 10.5 权限覆盖与输入修改
 
-钩子系统与权限系统通过 `PermissionOverride` 交互。`HookRunResult` 携带权限覆盖：
+Hooks系统与权限系统通过 `PermissionOverride` 交互。`HookRunResult` 携带权限覆盖：
 
 ```rust
 // claw-code/rust/crates/runtime/src/hooks.rs
@@ -574,11 +574,11 @@ CLI 前端实现这个 trait，在 `Started` 时显示钩子执行信息，在 `
 
 ## 小结
 
-钩子系统在 Rust 端以 `HookRunner`（`hooks.rs`）执行用户自定义的 shell 命令，覆盖工具执行的三个生命周期：`PreToolUse`（执行前，可修改输入、覆盖权限）、`PostToolUse`（成功执行后，可追加反馈）、`PostToolUseFailure`（执行失败后，可分析错误）。`RuntimeHookCommand`（`config.rs`）支持可选的 `matcher` 字段，用 `hook_matcher_matches` 实现多模式通配符匹配（逗号/管道分隔，支持 `*` 通配符）。
+Hooks系统在 Rust 端以 `HookRunner`（`hooks.rs`）执行用户自定义的 shell 命令，覆盖工具执行的三个生命周期：`PreToolUse`（执行前，可修改输入、覆盖权限）、`PostToolUse`（成功执行后，可追加反馈）、`PostToolUseFailure`（执行失败后，可分析错误）。`RuntimeHookCommand`（`config.rs`）支持可选的 `matcher` 字段，用 `hook_matcher_matches` 实现多模式通配符匹配（逗号/管道分隔，支持 `*` 通配符）。
 
 钩子命令通过 stdin 接收 JSON payload（包含事件类型、工具名、输入、输出），通过 stdout 返回结构化输出。`parse_hook_output` 解析 `systemMessage`、`reason`、`decision`、`hookSpecificOutput`（`permissionDecision`、`updatedInput`）等字段。退出码 0 表示成功（可含 `deny` 覆盖）、2 表示拒绝、其他非零表示失败。`HookAbortSignal` 用 `Arc<AtomicBool>` 提供可取消的执行，`HookProgressReporter` 报告执行进度。
 
-钩子系统与权限系统（第8章）通过 `PermissionOverride` 交互——PreToolUse 钩子可以返回 `Allow`/`Deny`/`Ask` 覆盖权限决策，也可以返回 `updatedInput` 修改工具输入。权限系统的 `authorize_with_context` 在评估流程中检查钩子覆盖，但 ask 规则的优先级高于钩子的 `Allow` 覆盖。
+Hooks系统与权限系统（第8章）通过 `PermissionOverride` 交互——PreToolUse 钩子可以返回 `Allow`/`Deny`/`Ask` 覆盖权限决策，也可以返回 `updatedInput` 修改工具输入。权限系统的 `authorize_with_context` 在评估流程中检查钩子覆盖，但 ask 规则的优先级高于钩子的 `Allow` 覆盖。
 
 | 关键文件 | 核心机制 | 对应章节 |
 | --- | --- | --- |

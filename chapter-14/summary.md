@@ -12,7 +12,7 @@ claw-code 的 Rust 实现由 10 个 crate 组成，约 11.6 万行代码。核�
 | --- | --- | --- |
 | `api` | `ProviderClient` 路由、`SseParser` 流解析、`PromptCache` 缓存 | 第5章 |
 | `tools` | `ToolSpec` 规范、`GlobalToolRegistry` 注册、`execute_tool_with_enforcer` 分发 | 第6章 |
-| `runtime` | `ConversationRuntime` 对话引擎、`Session` 会话管理、`PermissionPolicy` 权限系统、`HookRunner` 钩子系统、`McpToolRegistry` MCP 桥接、`TaskRegistry` 任务协调 | 第7-12章 |
+| `runtime` | `ConversationRuntime` 对话引擎、`Session` 会话管理、`PermissionPolicy` 权限系统、`HookRunner` Hooks系统、`McpToolRegistry` MCP 桥接、`TaskRegistry` 任务协调 | 第7-12章 |
 | `commands` | `SlashCommandSpec` 命令规范、命令分发 | 第4章 |
 | `plugins` | `PluginMetadata` 元数据、`PluginHooks` 钩子 | 第7章 |
 | `mock-anthropic-service` | `MockAnthropicService` API 模拟 | 第13章 |
@@ -89,9 +89,9 @@ claw-code 的终极目标是成为 clawable，一个可以被理解和修改的 
 
 **快速入门路径**（2-3 小时）：第0章（导读）→ 第2章（架构全景）→ 第3章（启动流程）→ 第11章（Turn Loop）。这条路径理解系统如何启动、如何运行对话轮次、数据如何在模块间流动。
 
-**安全审查路径**（3-4 小时）：第6章（工具系统）→ 第8章（权限系统）→ 第10章（钩子系统）。这条路径理解工具如何被分类、权限如何被评估、用户如何干预。适合安全工程师和运维工程师。
+**安全审查路径**（3-4 小时）：第6章（工具系统）→ 第8章（权限系统）→ 第10章（Hooks系统）。这条路径理解工具如何被分类、权限如何被评估、用户如何干预。适合安全工程师和运维工程师。
 
-**扩展开发路径**（4-5 小时）：第5章（API）→ 第6章（工具）→ 第7章（MCP）→ 第12章（协调器）。这条路径理解如何添加新 provider、新工具、MCP 服务器和任务编排。适合后端开发者。
+**扩展开发路径**（4-5 小时）：第5章（API）→ 第6章（工具）→ 第7章（MCP）→ 第12章（多 Agent 任务编排）。这条路径理解如何添加新 provider、新工具、MCP 服务器和任务编排。适合希望扩展 Agent 能力的开发者。
 
 **架构研究路径**（全书）：按顺序阅读。这条路径理解每个设计决策的上下文和权衡，适合系统架构师和代码贡献者。
 

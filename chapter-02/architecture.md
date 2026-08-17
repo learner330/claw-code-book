@@ -100,9 +100,9 @@ graph TD
 | 第7章 | MCP 协议与外部工具 | `runtime::mcp_*` + `plugins` | `McpServerManager`、`McpToolRegistry`、`McpClientTransport`、`PluginMetadata` | 如何连接外部工具和扩展 |
 | 第8章 | 权限系统 | `runtime::permission_enforcer` + `runtime::permissions` | `PermissionMode`、`PermissionPolicy`、`PermissionEnforcer`、`TrustResolver` | 如何限制 Agent 的操作范围 |
 | 第9章 | 会话管理 | `runtime::session` + `runtime::compact` | `Session`、`ContentBlock`、`ConversationMessage`、`SessionStore`、`compact_session` | 如何维护对话历史 |
-| 第10章 | 钩子系统 | `runtime::hooks` + `plugins::hooks` | `HookRunner`、`RuntimeHookCommand`、`HookProgressEvent` | 如何在关键节点插入处理 |
+| 第10章 | Hooks系统 | `runtime::hooks` + `plugins::hooks` | `HookRunner`、`RuntimeHookCommand`、`HookProgressEvent` | 如何在关键节点插入处理 |
 | 第11章 | Turn Loop 与对话引擎 | `runtime::conversation` + `runtime::prompt` | `ConversationRuntime`、`run_turn`、`build_assistant_message`、`ApiRequest`、`ProjectContext` | Agent 如何循环决策，系统提示词如何构建 |
-| 第12章 | 协调器 | `runtime::task_registry` + `runtime::team_cron_registry` | `TaskRegistry`、`LaneBoard`、`TeamRegistry`、`CronRegistry`、`PolicyEngine` | 多 Agent 如何分工 |
+| 第12章 | 多 Agent 任务编排 | `runtime::task_registry` + `runtime::team_cron_registry` | `TaskRegistry`、`LaneBoard`、`TeamRegistry`、`CronRegistry`、`PolicyEngine` | 多 Agent 如何分工 |
 | 第13章 | 测试与源码审计 | `mock-anthropic-service` + `compat-harness` | `MockAnthropicService`、`MockParityHarness`、`extract_manifest` | 如何保证行为正确性和覆盖率 |
 | 第14章 | 总结与展望 | — | — | 核心架构回顾与演进方向 |
 

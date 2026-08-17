@@ -3,8 +3,8 @@ layout: home
 
 hero:
   name: "Claw Code 代码讲解"
-  text: "从 Java 后端到 Agent 工程师"
-  tagline: 逐模块拆解 claw-code 源码，用 Java 工程师熟悉的概念理解 Agent 架构
+  text: "深入理解 Agent 运行时"
+  tagline: 逐模块拆解 claw-code 源码，理解 Agent 架构的设计决策与实现细节
   actions:
     - theme: brand
       text: 开始阅读
@@ -29,17 +29,28 @@ hero:
   <li><a href="/claw-code-book/chapter-07/mcp"><span class="ch-num">第 7 章</span>MCP 协议与外部工具连接</a></li>
   <li><a href="/claw-code-book/chapter-08/permissions"><span class="ch-num">第 8 章</span>权限系统</a></li>
   <li><a href="/claw-code-book/chapter-09/session"><span class="ch-num">第 9 章</span>会话管理</a></li>
-  <li><a href="/claw-code-book/chapter-10/hooks"><span class="ch-num">第 10 章</span>钩子系统</a></li>
+  <li><a href="/claw-code-book/chapter-10/hooks"><span class="ch-num">第 10 章</span>Hooks系统</a></li>
   <li><a href="/claw-code-book/chapter-11/turn-loop"><span class="ch-num">第 11 章</span>Turn Loop 与对话引擎</a></li>
-  <li><a href="/claw-code-book/chapter-12/coordinator"><span class="ch-num">第 12 章</span>协调器</a></li>
+  <li><a href="/claw-code-book/chapter-12/coordinator"><span class="ch-num">第 12 章</span>多 Agent 任务编排</a></li>
   <li><a href="/claw-code-book/chapter-13/testing"><span class="ch-num">第 13 章</span>测试与源码审计</a></li>
   <li><a href="/claw-code-book/chapter-14/summary"><span class="ch-num">第 14 章</span>总结与展望</a></li>
 </ul>
 
 ## 关于本书
 
-全书共 15 章（含导读），覆盖从启动流程到测试验证的完整技术栈。
+Claw Code 是 Claude Code 的公开 Rust 实现。本书逐模块拆解它的源码，从 CLI 入口到 Turn Loop，从工具系统到权限边界，从会话持久化到测试验证，覆盖 Agent 运行时的完整链路。
 
-面向有 Java 后端经验的开发者，用 Spring Boot、MyBatis 等熟悉概念类比 Agent 架构，帮助读者从「用 AI 写代码」进阶到「看懂 AI 怎么写代码」。每段代码分析均来自实际源码文件，标注路径，可对照阅读。
+全书 15 章（含导读），每章聚焦一个核心模块。代码片段全部来自 `claw-code/rust/` 目录的实际文件，标注了完整路径，建议在本地打开源码对照阅读。
+
+本书面向有系统开发经验的工程师。遇到 Rust 特有的语法时会做简要说明，重点放在设计思路和模块边界上。读完之后，你应该能回答这些问题：
+
+- Agent 和传统 CLI 的本质区别是什么
+- claw-code 如何用 10 个 crate 组织代码
+- Bootstrap 的 12 个阶段分别做什么
+- ConfigLoader 的三层合并如何工作
+- Turn Loop 如何把"一句话"变成"多步工具调用"
+- PermissionMode 的五级模型如何拦截危险操作
+- Session 的 JSONL 持久化如何保证原子写入
+- MockParityHarness 如何验证 Rust 实现与参考实现的行为一致
 
 </div>

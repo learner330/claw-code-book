@@ -710,7 +710,7 @@ pub enum TrustResolution {
 - `PermissionPolicy` 的 `PermissionRule` 评估单次工具调用，条件面向工具名称和输入参数，动作是 Allow/Deny/Ask 决策。
 - `PolicyEngine` 的 `PolicyRule` 评估 Lane 生命周期状态，条件面向 `LaneContext`（green level、分支新鲜度、审查状态等），动作是 MergeToDev、Retry、CloseoutLane 等工作流操作。
 
-这种相似性不是巧合——claw-code 的权限系统和协调器系统共享了"规则引擎"这一抽象，但面向不同的领域（安全授权 vs 工作流自动化）。`PolicyEngine` 的详细实现（包括 `PolicyCondition` 的组合逻辑、`LaneContext` 的 12 维状态快照、`PolicyAction::Chain` 的动作组合、`evaluate_with_events` 的评估流程）在第12章协调器中展开，与 `TaskRegistry` 和 `LaneBoard` 的协同工作一并分析。
+这种相似性不是巧合——claw-code 的权限系统和任务编排系统共享了"规则引擎"这一抽象，但面向不同的领域（安全授权 vs 工作流自动化）。`PolicyEngine` 的详细实现（包括 `PolicyCondition` 的组合逻辑、`LaneContext` 的 12 维状态快照、`PolicyAction::Chain` 的动作组合、`evaluate_with_events` 的评估流程）在第12章多 Agent 任务编排中展开，与 `TaskRegistry` 和 `LaneBoard` 的协同工作一并分析。
 
 ## 小结
 

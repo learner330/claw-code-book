@@ -4,7 +4,7 @@
 
 本章分析 claw-code 的 API 通信层，对应 `api` crate。这一层负责与上游 LLM 服务建立连接、发送请求、接收流式响应，并在本地缓存 prompt 以降低重复调用的成本。
 
-API 层要解决的核心问题是：Agent 需要同时支持 Anthropic 原生协议和 OpenAI 兼容协议，需要根据模型名自动路由到正确的 Provider，需要处理 SSE 流式响应的解析，还需要在会话级别缓存 prompt 以利用后端提供的 prompt cache 能力。
+API 层要解决的核心问题是：Agent 需要同时支持 Anthropic 原生协议和 OpenAI 兼容协议，需要根据模型名自动路由到正确的 Provider，需要处理 SSE 流式响应的解析，还需要在会话级别缓存 prompt 以利用服务端提供的 prompt cache 能力。
 
 | 关键文件 | 职责 |
 | --- | --- |
@@ -75,7 +75,7 @@ pub fn from_model_with_anthropic_auth(
 
 路由逻辑分三步。第一步 `resolve_model_alias` 把别名（如 `"opus"`、`"sonnet"`）解析为完整模型 ID。第二步 `detect_provider_kind` 根据模型名前缀判断 Provider 类型。第三步根据 Provider 类型创建对应的客户端。
 
-`OpenAi` 变体的分支最为复杂，因为它需要处理多个 OpenAI 兼容后端：本地 Ollama（通过 `OLLAMA_HOST` 环境变量检测）、DashScope（模型 ID 以 `qwen-` 开头）、以及标准 OpenAI。`metadata_for_model` 返回的 `ProviderMetadata` 包含 `auth_env` 字段，用于区分不同的认证环境变量。
+`OpenAi` 变体的分支最为复杂，因为它需要处理多个 OpenAI 兼容服务端：本地 Ollama（通过 `OLLAMA_HOST` 环境变量检测）、DashScope（模型 ID 以 `qwen-` 开头）、以及标准 OpenAI。`metadata_for_model` 返回的 `ProviderMetadata` 包含 `auth_env` 字段，用于区分不同的认证环境变量。
 
 `ProviderClient` 提供统一的发送和流式接口：
 
@@ -572,7 +572,7 @@ pub struct PromptCacheStats {
 }
 ```
 
-`tracked_requests` 是总请求数。`completion_cache_hits/misses/writes` 是完成缓存的命中、未命中和写入次数。`unexpected_cache_breaks` 记录异常失效次数——这是关键诊断指标，如果 cache read tokens 突然大幅下降但 prompt 没变，说明后端缓存策略发生变化或 prompt 序列化不稳定。
+`tracked_requests` 是总请求数。`completion_cache_hits/misses/writes` 是完成缓存的命中、未命中和写入次数。`unexpected_cache_breaks` 记录异常失效次数——这是关键诊断指标，如果 cache read tokens 突然大幅下降但 prompt 没变，说明服务端缓存策略发生变化或 prompt 序列化不稳定。
 
 ## 5.7 HTTP 客户端配置
 

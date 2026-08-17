@@ -754,4 +754,4 @@ Turn Loop 在 Rust 端以 `ConversationRuntime`（`conversation.rs`）为生产�
 | `rust/crates/runtime/src/conversation.rs` | `maybe_auto_compact`、`SessionTracer` | 11.4-11.5 |
 | `rust/crates/runtime/src/compact.rs` | `compact_session`、`CompactionConfig` | 11.4 |
 
-下一章将分析协调器与任务编排——`TaskRegistry` 如何管理多 Agent 任务状态，`TeamRegistry` 如何维护团队关系，以及 `LaneBoard` 如何按状态分组展示任务进度。
+下一章将分析多 Agent 任务编排——`TaskRegistry` 如何管理子 Agent 任务状态，`TeamRegistry` 如何维护团队关系，以及 `LaneBoard` 如何按状态分组展示任务进度。

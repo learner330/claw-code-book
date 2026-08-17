@@ -1,78 +1,41 @@
-# 我的书
+# Claw Code 代码讲解
 
-一本用 [VitePress](https://vitepress.dev) 构建的多章节书籍，托管在 GitHub Pages 上。
+逐模块拆解 [claw-code](https://github.com/ultraworkers/claw-code)（Claude Code 的公开 Rust 实现）源码，理解 Agent 运行时的完整链路。
 
-## 本地开发
+## 本书定位
 
-```bash
-npm install      # 安装依赖
-npm run dev      # 启动本地预览 (http://localhost:5173)
-npm run build    # 构建静态网站到 .vitepress/dist
-npm run preview  # 预览构建结果
-```
+Agent 已经成为下一代软件开发的基础设施。claw-code 用 Rust 重写了 Claude Code 的核心运行时，约 11.6 万行代码分布在 10 个 crate 中。本书的目标是让有一定系统开发经验的工程师能读懂这套代码，深入到每个模块的设计决策和源码实现。
 
-## 写作指南
+每章聚焦一个核心模块，代码片段全部来自实际源码文件，标注完整路径，可对照阅读。
 
-在项目根目录下按章节创建文件夹，每个 `.md` 文件就是一个页面。
+## 章节目录
 
-**添加新章节**的步骤：
+| 章节 | 标题 | 核心内容 |
+| --- | --- | --- |
+| 导读 | 本书定位与阅读指南 | 全书结构、claw-code 项目背景、建议阅读路径 |
+| 第 1 章 | 什么是 Agent | Agent 与传统 CLI 的本质区别、工具概念、权限必要性 |
+| 第 2 章 | 整体架构全景 | 10 个 crate 的模块地图、数据流、依赖关系、目录结构速查 |
+| 第 3 章 | 启动流程 | CLI 入口、Bootstrap 阶段编排、ConfigLoader 三层合并、来源追踪、Commands/Skills 解析 |
+| 第 4 章 | 配置系统 | RuntimeFeatureConfig 类型化视图、配置校验、字段消费方速查表 |
+| 第 5 章 | API 通信与模型交互 | SSE 流解析、Provider 路由、PromptCache |
+| 第 6 章 | 工具系统 | ToolSpec 规范、GlobalToolRegistry 三层注册、40 个工具清单、执行分发 |
+| 第 7 章 | MCP 协议与外部工具 | McpServerManager 生命周期、六种传输方式、插件系统、降级启动 |
+| 第 8 章 | 权限系统 | PermissionMode 五级模型、PermissionPolicy 规则引擎、TrustResolver |
+| 第 9 章 | 会话管理 | Session 状态机、JSONL 持久化、自动压缩、会话分叉 |
+| 第 10 章 | Hooks系统 | HookRunner 三事件生命周期、权限覆盖、JSON 协议、取消信号 |
+| 第 11 章 | Turn Loop 与对话引擎 | ConversationRuntime 泛型设计、run_turn 循环、系统提示词构建 |
+| 第 12 章 | 多 Agent 任务编排 | TaskRegistry、LaneBoard、Team/Cron 编排、PolicyEngine 规则决策 |
+| 第 13 章 | 测试与源码审计 | MockAnthropicService、MockParityHarness、compat-harness 兼容性审计 |
+| 第 14 章 | 总结与展望 | 核心架构回顾、设计权衡、演进方向 |
 
-1. 创建文件夹，如 `chapter-03/`
-2. 在文件夹中创建 `.md` 文件
-3. 打开 `.vitepress/config.ts`，在 `sidebar` 中添加对应配置
-4. 如果需要在导航栏显示，在 `nav` 中添加链接
+## 阅读建议
 
-## 部署到 GitHub Pages
+读者最好能了解 Rust 的基本语法，以便重点理解设计思路和模块边界。
 
-### 1. 创建 GitHub 仓库
+## 源码分析边界
 
-将本项目推送到 GitHub 仓库（建议设为公开仓库，免费额度更大）。
+本书基于 claw-code 仓库的 main 分支，分析边界以 `rust/` 目录下的 Cargo workspace 为限。`src/` 目录下的 Python 代码是参考实现和审计辅助工具，不属于本书分析范围。
 
-### 2. 修改配置
+## License
 
-打开 `.vitepress/config.ts`，将 `base` 的值改为你自己的仓库名：
-
-```ts
-base: '/你的仓库名/',
-```
-
-同时修改 `socialLinks` 中的 GitHub 链接和 `index.md` 中的仓库地址。
-
-### 3. 开启 GitHub Pages
-
-进入仓库的 **Settings → Pages → Build and deployment**，将 Source 设为 **GitHub Actions**。
-
-### 4. 推送代码
-
-```bash
-git add .
-git commit -m "初始化书籍项目"
-git push origin main
-```
-
-推送后 GitHub Actions 会自动构建并部署。等待约 1-2 分钟，访问：
-
-```
-https://你的用户名.github.io/你的仓库名/
-```
-
-## 目录结构
-
-```
-my-book/
-├── .vitepress/
-│   └── config.ts        # 配置文件（导航栏、侧边栏、搜索等）
-├── .github/
-│   └── workflows/
-│       └── deploy.yml   # GitHub Actions 自动部署
-├── chapter-01/
-│   ├── intro.md         # 第一章：导言
-│   └── basics.md        # 第一章：基础概念
-├── chapter-02/
-│   ├── advanced.md      # 第二章：进阶主题
-│   └── examples.md      # 第二章：实战示例
-├── public/              # 图片等静态资源
-├── index.md             # 首页
-├── package.json
-└── .gitignore
-```
+本书内容采用 [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/) 许可协议。

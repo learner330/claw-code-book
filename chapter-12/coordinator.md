@@ -1,10 +1,10 @@
-# 第12章 协调器：TaskRegistry 与 Team/Cron 编排
+# 第12章 多 Agent 任务编排：TaskRegistry 与 Team/Cron 协调
 
 ## 本章概览
 
-本章分析 claw-code 的协调器系统——如何管理子 Agent 任务、团队和定时任务。对应 `runtime::task_registry` 和 `runtime::team_cron_registry` 模块。
+本章分析 claw-code 的多 Agent 任务编排系统——如何管理子 Agent 任务、团队和定时任务。对应 `runtime::task_registry` 和 `runtime::team_cron_registry` 模块。
 
-协调器系统解决的核心问题是：单个 Agent 实例一次只能处理一个任务，但复杂项目需要并行执行多个子任务（如同时修改多个文件、并行测试）。协调器通过任务注册表跟踪每个子任务的状态，通过团队注册表把任务分组，通过定时注册表管理周期性任务。
+任务编排系统解决的核心问题是：单个 Agent 实例一次只能处理一个任务，但复杂项目需要并行执行多个子任务（如同时修改多个文件、并行测试）。它通过任务注册表跟踪每个子任务的状态，通过团队注册表把任务分组，通过定时注册表管理周期性任务。
 
 | 关键文件 | 职责 |
 | --- | --- |
@@ -467,7 +467,7 @@ fn global_cron_registry() -> &'static CronRegistry {
 
 ## 12.5 Lane 工作流自动化：PolicyEngine
 
-`PolicyEngine` 是协调器系统的规则决策层。它与第8章的 `PermissionPolicy` 不同——`PermissionPolicy` 评估单次工具调用的授权，`PolicyEngine` 评估 Lane（工作流分支）的生命周期状态并决定自动化动作。`PolicyEngine` 的配置来自 `settings.json` 中的 `policy_rules` 字段（第4章），但评估逻辑完全在 `runtime::policy_engine.rs` 中实现。
+`PolicyEngine` 是任务编排系统的规则决策层。它与第8章的 `PermissionPolicy` 不同——`PermissionPolicy` 评估单次工具调用的授权，`PolicyEngine` 评估 Lane（工作流分支）的生命周期状态并决定自动化动作。`PolicyEngine` 的配置来自 `settings.json` 中的 `policy_rules` 字段（第4章），但评估逻辑完全在 `runtime::policy_engine.rs` 中实现。
 
 ### 规则结构
 
@@ -620,7 +620,7 @@ pub fn evaluate_with_events(engine: &PolicyEngine, context: &LaneContext) -> Pol
 
 ## 小结
 
-协调器系统在 Rust 端以三个线程安全的注册表实现：`TaskRegistry`（`task_registry.rs`）管理子 Agent 任务生命周期（Created → Running → Blocked → Completed/Failed/Stopped），`Arc<Mutex<RegistryInner>>` 模式提供共享状态，`lane_board` 按状态分组生成看板，`LaneHeartbeat` 检测僵死任务（Healthy/Stalled/TransportDead）。`TeamRegistry`（`team_cron_registry.rs`）管理团队分组，支持软删除（标记 Deleted）和硬删除（remove）。`CronRegistry` 管理周期性任务，记录 schedule、enabled、last_run_at、run_count，但不实现调度器——调度由外部触发。
+多 Agent 任务编排系统在 Rust 端以三个线程安全的注册表实现：`TaskRegistry`（`task_registry.rs`）管理子 Agent 任务生命周期（Created → Running → Blocked → Completed/Failed/Stopped），`Arc<Mutex<RegistryInner>>` 模式提供共享状态，`lane_board` 按状态分组生成看板，`LaneHeartbeat` 检测僵死任务（Healthy/Stalled/TransportDead）。`TeamRegistry`（`team_cron_registry.rs`）管理团队分组，支持软删除（标记 Deleted）和硬删除（remove）。`CronRegistry` 管理周期性任务，记录 schedule、enabled、last_run_at、run_count，但不实现调度器——调度由外部触发。
 
 `PolicyEngine`（`policy_engine.rs`）提供 Lane 工作流的自动化决策——`PolicyRule` 的条件-动作三元组对 `LaneContext` 状态快照求值，所有匹配规则同时触发，`Chain` 支持动作组合。`PolicyEngine` 与 `TaskRegistry`、`LaneBoard` 构成"状态-规则-动作"闭环。
 

@@ -706,4 +706,4 @@ fn merge_compact_summaries(existing_summary: Option<&str>, new_summary: &str) ->
 | `rust/crates/runtime/src/session_control.rs` | `SessionStore`、工作区指纹、会话恢复、分叉 | 9.4, 9.6 |
 | `rust/crates/runtime/src/compact.rs` | `compact_session`、`summarize_messages`、摘要合并 | 9.5 |
 
-下一章将分析钩子系统——`HookRunner` 如何在工具执行前后插入用户自定义逻辑，PreToolUse 和 PostToolUse 钩子如何修改输入、覆盖权限和追加反馈。
+下一章将分析Hooks系统——`HookRunner` 如何在工具执行前后插入用户自定义逻辑，PreToolUse 和 PostToolUse 钩子如何修改输入、覆盖权限和追加反馈。
