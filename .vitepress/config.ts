@@ -2,7 +2,7 @@ import { defineConfig } from 'vitepress'
 
 export default defineConfig({
   title: 'Claw Code 代码讲解',
-  description: '逐模块拆解 claw-code 源码，从 Java 后端到 Agent 工程师',
+  description: '逐模块拆解 claw-code 源码，深入理解 Agent 运行时',
 
   lastUpdated: true,
   base: '/claw-code-book/',
@@ -31,9 +31,9 @@ export default defineConfig({
       { text: '第 7 章 MCP 协议与外部工具连接', link: '/chapter-07/mcp' },
       { text: '第 8 章 权限系统', link: '/chapter-08/permissions' },
       { text: '第 9 章 会话管理', link: '/chapter-09/session' },
-      { text: '第 10 章 钩子系统', link: '/chapter-10/hooks' },
+      { text: '第 10 章 Hooks系统', link: '/chapter-10/hooks' },
       { text: '第 11 章 Turn Loop 与对话引擎', link: '/chapter-11/turn-loop' },
-      { text: '第 12 章 协调器', link: '/chapter-12/coordinator' },
+      { text: '第 12 章 多 Agent 任务编排', link: '/chapter-12/coordinator' },
       { text: '第 13 章 测试与源码审计', link: '/chapter-13/testing' },
       { text: '第 14 章 总结与展望', link: '/chapter-14/summary' },
     ],
