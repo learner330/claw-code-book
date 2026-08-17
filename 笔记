@@ -1,0 +1,32 @@
+schema验证是什么
+
+导读中添加对rust语法的提示
+
+第五章模型api的部分是否有设计模式
+
+5.3 push帧时为什么是while循环
+
+5.3 解析逻辑分五步。第一步 trim 空帧。第二步逐行解析：以 : 开头的是注释行，跳过；以 event: 开头的是事件名，记录；以 data: 开头的是数据行，收集。第三步如果事件名是 "ping"，返回 None（心跳帧，无业务数据）。第四步如果没有数据行，返回 None。第五步把数据行拼接为 JSON payload，反序列化为 StreamEvent。
+写的不是很明白
+
+5.4 claude- 前缀路由到 Anthropic，grok- 前缀路由到 Xai，其余默认路由到 OpenAI 兼容协议。这个启发式简单但有效——所有主流 OpenAI 兼容模型（GPT、Qwen、Llama 等）都不以 claude- 或 grok- 开头。
+有点意思
+
+java类比的章节摘出去，本手册不再涉及任何java内容
+
+5.6 PromptCache 在本地磁盘缓存 prompt 的响应，避免重复调用相同的 prompt：
+没太懂
+
+5.6 completion_ttl（默认 30 秒）是完成结果缓存的存活时间——完成结果变化快（如代码生成），缓存时间短。prompt_ttl（默认 5 分钟）是 prompt 本身缓存的存活时间——prompt 指纹（请求特征）相对稳定。cache_break_min_drop（默认 2000 token）是判定缓存异常失效的阈值——如果 cache read tokens 下降超过此值，视为异常失效。
+写的不是很明白
+
+5.6 sanitize_path_segment 把会话 ID 中的特殊字符替换为安全字符，防止路径遍历攻击。缓存根目录默认在系统临时目录下。
+可以具体看看
+
+5.6 tracked_requests 是总请求数。completion_cache_hits/misses/writes 是完成缓存的命中、未命中和写入次数。unexpected_cache_breaks 记录异常失效次数——这是关键诊断指标，如果 cache read tokens 突然大幅下降但 prompt 没变，说明后端缓存策略发生变化或 prompt 序列化不稳定。
+进一步解释下，没太懂
+
+6.1 所有内置工具名（如 "bash"、"read_file"）都直接编译进二进制文件。
+意义是什么
+
+6.4 只有关于只读命令的动态权限分类吗

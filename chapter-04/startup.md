@@ -2,7 +2,8 @@
 
 ## 本章概览
 
-本章分析 claw-code 从接收命令行参数到进入 Turn Loop 之间的完整初始化过程。对应第2章架构全景中的 `rusty-claude-cli` 和 `runtime::config` 两个模块。
+本章分析 claw-code 从接收命令行参数到进入 Turn Loop 之间的完整初始化过程。
+<!-- 对应第2章架构全景中的 `rusty-claude-cli` 和 `runtime::config` 两个模块。 -->
 
 启动流程要解决的核心问题是：如何把一组命令行参数、若干个 JSON 配置文件、一个 CLAUDE.md 指令文件，组装成一个可运行的 Agent 系统。这个过程分为多个阶段（Bootstrap Plan），每个阶段有明确的职责，前一阶段的输出是后一阶段的输入。
 
@@ -16,7 +17,7 @@
 
 ## 4.1 CLI 入口与参数解析
 
-Rust 版的入口在 `rust/crates/rusty-claude-cli/src/main.rs` 中。`main()` 函数只做错误包装，核心逻辑在 `run()` 中：
+入口在 `rust/crates/rusty-claude-cli/src/main.rs` 中。`main()` 函数只做错误包装，核心逻辑在 `run()` 中：
 
 ```rust
 // claw-code/rust/crates/rusty-claude-cli/src/main.rs
@@ -51,7 +52,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
 `run()` 函数的前三行有一个重要的设计：JSON 模式检测。`raw_args_request_json_output(&args)` 在正式解析参数之前先扫描原始 argv，检查是否包含 `--output-format json`。如果是，就调用 `suppress_config_warnings_for_json_mode()` 抑制配置加载阶段的弃用警告。
 
-为什么要这么做？因为后续的 `ConfigLoader::load()` 在发现过时的配置项时会向 stderr 输出警告文本。在 JSON 模式下，下游工具（如 CI 脚本）期望 stderr 是干净的——任何非 JSON 输出都会干扰解析。这个"预扫描 + 抑制"的设计确保了 JSON 模式的输出纯粹性。
+这么做是因为后续的 `ConfigLoader::load()` 在发现过时的配置项时会向 stderr 输出警告文本。在 JSON 模式下，下游工具（如 CI 脚本）期望 stderr 是干净的——任何非 JSON 输出都会干扰解析。这个"预扫描 + 抑制"的设计确保了 JSON 模式的输出纯粹性。
 
 `parse_args()` 返回 `CliAction` 枚举，定义了所有支持的 CLI 动作：
 
@@ -202,7 +203,7 @@ pub fn default_for(cwd: impl Into<PathBuf>) -> Self {
 }
 ```
 
-### discover()：五文件发现
+### discover()：文件发现
 
 `discover()` 方法返回按优先级排列的配置文件列表：
 
