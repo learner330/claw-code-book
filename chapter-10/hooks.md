@@ -161,7 +161,7 @@ PostToolUse 和 PostToolUseFailure 的结构类似，只是 `tool_output` 为 `S
     }
 ```
 
-执行流程分五步。第一步空检查——如果命令列表为空，直接返回 `allow`（无消息）。第二步取消检查——如果 `abort_signal` 已触发，返回 `cancelled` 状态。第三步生成 payload——`hook_payload` 构造 JSON 数据，通过 stdin 传给钩子命令。第四步遍历命令——用 `filter(|command| command.matches_tool(tool_name))` 只执行匹配当前工具的命令。第五步执行命令——`run_command` 启动子进程，解析输出，合并结果。
+执行流程分五步。第一步空检查——如果命令列表为空，直接返回 `allow`（无消息）。第二步取消检查——如果 `abort_signal` 已触发，返回 `cancelled` 状态。第三步生成 payload——`hook_payload` 构造 JSON 数据，通过 stdin 传给钩子命令。第四步遍历命令，用 `filter(|command| command.matches_tool(tool_name))` 只执行匹配当前工具的命令。第五步执行命令，`run_command` 启动子进程，解析输出，合并结果。
 
 `merge_parsed_hook_output` 把多个命令的结果合并到一个 `HookRunResult`：消息追加到列表，权限覆盖和输入修改取最后一个非空值。
 
@@ -437,7 +437,7 @@ pub struct RuntimeHookCommand {
     }
 ```
 
-`is_none_or` 是 `Option` 的方法——`None` 时返回 `true`（无 matcher 表示匹配所有工具），`Some` 时调用 `hook_matcher_matches`。
+`is_none_or` 是 `Option` 的方法，`None` 时返回 `true`（无 matcher 表示匹配所有工具），`Some` 时调用 `hook_matcher_matches`。
 
 `hook_matcher_matches` 支持逗号或管道分隔的多模式匹配：
 
@@ -455,7 +455,7 @@ fn hook_matcher_matches(matcher: &str, tool_name: &str) -> bool {
 }
 ```
 
-`split([',', '|'])` 用字符数组作为分隔符——逗号或管道都可以分隔多个模式。`any` 短路匹配——任一模式匹配即返回 `true`。三个匹配条件：`*` 匹配所有工具名；精确匹配（不区分大小写）；通配符匹配。
+`split([',', '|'])` 用字符数组作为分隔符——逗号或管道都可以分隔多个模式。`any` 短路匹配，任一模式匹配即返回 `true`。三个匹配条件：`*` 匹配所有工具名；精确匹配（不区分大小写）；通配符匹配。
 
 `wildcard_match` 实现简单的 `*` 通配符：
 
@@ -506,7 +506,7 @@ fn wildcard_match(pattern: &str, value: &str) -> bool {
     assert_eq!(bash_result.messages(), &["legacy", "bash only"]);
 ```
 
-三个命令——`legacy`（无 matcher，匹配所有）、`bash only`（matcher `Bash`）、`read only`（matcher `Read*`）——`ReadFile` 匹配 `legacy` 和 `read only`，`Bash` 匹配 `legacy` 和 `bash only`。
+三个命令，`legacy`（无 matcher，匹配所有）、`bash only`（matcher `Bash`）、`read only`（matcher `Read*`）——`ReadFile` 匹配 `legacy` 和 `read only`，`Bash` 匹配 `legacy` 和 `bash only`。
 
 ## 10.7 取消信号与进度报告
 

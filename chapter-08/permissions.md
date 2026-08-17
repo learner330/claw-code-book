@@ -30,19 +30,19 @@ pub enum PermissionMode {
 }
 ```
 
-`#[derive(..., PartialOrd, Ord)]` 让枚举变体支持大小比较——`ReadOnly < WorkspaceWrite < DangerFullAccess`。这个偏序关系用于权限检查：`current_mode >= required_mode` 表示当前权限级别满足工具要求。
+`#[derive(..., PartialOrd, Ord)]` 让枚举变体支持大小比较，`ReadOnly < WorkspaceWrite < DangerFullAccess`。这个偏序关系用于权限检查：`current_mode >= required_mode` 表示当前权限级别满足工具要求。
 
 五个变体的含义和设计意图：
 
-`ReadOnly` 是最严格的权限级别——只允许读取操作（`read_file`、`glob_search`、`grep_search`）。在这个模式下，所有写操作和 shell 命令都被拒绝（除非 bash 命令被分类为只读）。适用于只读分析场景，如代码审查。
+`ReadOnly` 是最严格的权限级别，只允许读取操作（`read_file`、`glob_search`、`grep_search`）。在这个模式下，所有写操作和 shell 命令都被拒绝（除非 bash 命令被分类为只读）。适用于只读分析场景，如代码审查。
 
-`WorkspaceWrite` 允许在工作区目录内读写文件。工作区外的写操作被拒绝。bash 命令需要检查路径参数是否在工作区内。这是默认的权限级别——在可信环境中允许大部分操作，但防止意外修改工作区外的文件。
+`WorkspaceWrite` 允许在工作区目录内读写文件。工作区外的写操作被拒绝。bash 命令需要检查路径参数是否在工作区内。这是默认的权限级别，在可信环境中允许大部分操作，但防止意外修改工作区外的文件。
 
 `DangerFullAccess` 允许任意操作，包括工作区外的文件写入和任意 shell 命令。用户需要显式指定 `--permission-mode danger-full-access` 才会启用。适用于需要完全控制权的场景，如系统管理任务。
 
-`Prompt` 不在偏序链中——它不与 `ReadOnly`/`WorkspaceWrite`/`DangerFullAccess` 比较大小。在 `Prompt` 模式下，每次敏感操作都需要用户交互确认。`PermissionEnforcer::check` 在 `Prompt` 模式下直接返回 `Allowed`，把交互确认的逻辑交给调用方（如 CLI 前端）。
+`Prompt` 不在偏序链中，它不与 `ReadOnly`/`WorkspaceWrite`/`DangerFullAccess` 比较大小。在 `Prompt` 模式下，每次敏感操作都需要用户交互确认。`PermissionEnforcer::check` 在 `Prompt` 模式下直接返回 `Allowed`，把交互确认的逻辑交给调用方（如 CLI 前端）。
 
-`Allow` 是最高权限——无条件允许所有操作，不需要任何确认。与 `DangerFullAccess` 的区别是：`DangerFullAccess` 仍然受 deny 规则和 ask 规则约束，`Allow` 则跳过这些检查（除了 denied_tools）。
+`Allow` 是最高权限，无条件允许所有操作，不需要任何确认。与 `DangerFullAccess` 的区别是：`DangerFullAccess` 仍然受 deny 规则和 ask 规则约束，`Allow` 则跳过这些检查（除了 denied_tools）。
 
 `as_str` 方法把枚举转为字符串表示，用于错误消息和配置序列化：
 
@@ -84,7 +84,7 @@ pub struct PermissionPolicy {
 }
 ```
 
-`active_mode` 是当前激活的权限级别——由 CLI 参数 `--permission-mode` 或配置文件设置。`tool_requirements` 是每个工具的最低权限要求映射——`BTreeMap` 按键排序，查找是 O(log n)。`allow_rules`、`deny_rules`、`ask_rules` 是三组规则列表，分别表示允许、拒绝和需要确认的规则。`denied_tools` 是工具名黑名单——无条件拒绝，优先于所有规则。
+`active_mode` 是当前激活的权限级别，由 CLI 参数 `--permission-mode` 或配置文件设置。`tool_requirements` 是每个工具的最低权限要求映射，`BTreeMap` 按键排序，查找是 O(log n)。`allow_rules`、`deny_rules`、`ask_rules` 是三组规则列表，分别表示允许、拒绝和需要确认的规则。`denied_tools` 是工具名黑名单，无条件拒绝，优先于所有规则。
 
 `new` 创建一个只有 active_mode 的策略，其余为空：
 
@@ -156,7 +156,7 @@ impl PermissionPolicy {
     }
 ```
 
-注释 `#94` 引用 issue 编号——工具名统一转小写以匹配运行时约定。`PermissionRule::parse` 把规则字符串解析为结构化的 `PermissionRule`。三组规则分别从配置的 `allow()`、`deny()`、`ask()` 方法获取。
+注释 `#94` 引用 issue 编号，工具名统一转小写以匹配运行时约定。`PermissionRule::parse` 把规则字符串解析为结构化的 `PermissionRule`。三组规则分别从配置的 `allow()`、`deny()`、`ask()` 方法获取。
 
 `required_mode_for` 查询工具的权限要求，默认为 `DangerFullAccess`：
 
@@ -172,7 +172,7 @@ impl PermissionPolicy {
     }
 ```
 
-`copied()` 把 `Option<&PermissionMode>` 转为 `Option<PermissionMode>`——因为 `PermissionMode` 实现了 `Copy` trait（它是枚举，大小固定，可以按值拷贝）。`unwrap_or(DangerFullAccess)` 在工具不在映射中时返回默认值——未知工具默认需要最高权限，这是安全保守策略。
+`copied()` 把 `Option<&PermissionMode>` 转为 `Option<PermissionMode>`——因为 `PermissionMode` 实现了 `Copy` trait（它是枚举，大小固定，可以按值拷贝）。`unwrap_or(DangerFullAccess)` 在工具不在映射中时返回默认值，未知工具默认需要最高权限，这是安全保守策略。
 
 ### PermissionRule：规则语法与匹配
 
@@ -196,7 +196,7 @@ enum PermissionRuleMatcher {
 }
 ```
 
-`raw` 是原始规则字符串（如 `"bash(git:*)"`），用于错误消息。`tool_name` 是规则适用的工具名（如 `"bash"`）。`matcher` 是匹配器——`Any` 匹配任何输入，`Exact` 精确匹配，`Prefix` 前缀匹配。
+`raw` 是原始规则字符串（如 `"bash(git:*)"`），用于错误消息。`tool_name` 是规则适用的工具名（如 `"bash"`）。`matcher` 是匹配器，`Any` 匹配任何输入，`Exact` 精确匹配，`Prefix` 前缀匹配。
 
 `parse` 方法把规则字符串解析为结构体：
 
@@ -232,7 +232,7 @@ impl PermissionRule {
     }
 ```
 
-解析逻辑分两步。第一步查找括号——`find_first_unescaped` 查找第一个未转义的 `(`，`find_last_unescaped` 查找最后一个未转义的 `)`。这两个函数处理转义字符，确保括号内的括号不被误识别。
+解析逻辑分两步。第一步查找括号，`find_first_unescaped` 查找第一个未转义的 `(`，`find_last_unescaped` 查找最后一个未转义的 `)`。这两个函数处理转义字符，确保括号内的括号不被误识别。
 
 第二步如果找到匹配的括号对，提取工具名和内容。`trimmed[..open]` 是括号前的部分（工具名），`trimmed[open + 1..close]` 是括号内的内容（匹配参数）。`parse_rule_matcher` 把内容解析为 `PermissionRuleMatcher`——如果内容以 `*` 结尾，解析为 `Prefix`（去掉 `*`）；否则解析为 `Exact`。
 
@@ -259,11 +259,11 @@ impl PermissionRule {
     }
 ```
 
-匹配分两步。第一步工具名必须完全匹配——`self.tool_name` 在 `parse` 时已经转小写，但传入的 `tool_name` 可能不是小写——这里假设调用方已经做了规范化。
+匹配分两步。第一步工具名必须完全匹配，`self.tool_name` 在 `parse` 时已经转小写，但传入的 `tool_name` 可能不是小写——这里假设调用方已经做了规范化。
 
 第二步根据 matcher 类型匹配输入内容。`Any` 直接返回 `true`。`Exact` 和 `Prefix` 都需要先从输入中提取主体（`extract_permission_subject`），然后做精确或前缀匹配。`is_some_and` 是 `Option` 的方法——`Some` 时应用闭包，`None` 时返回 `false`。
 
-`extract_permission_subject` 从工具输入的 JSON payload 中提取匹配主体——通常是 `command`（bash 工具）、`path`（文件工具）或 `file_path` 字段的值。
+`extract_permission_subject` 从工具输入的 JSON payload 中提取匹配主体，通常是 `command`（bash 工具）、`path`（文件工具）或 `file_path` 字段的值。
 
 ### authorize_with_context：授权评估流程
 
@@ -296,7 +296,7 @@ impl PermissionRule {
         }
 ```
 
-前两步是无条件拒绝。第一步检查 `denied_tools`——如果工具名在黑名单中，直接拒绝。注释 `#159` 说明这是第一道防线，优先于所有规则。`self.denied_tools.iter().any(|t| t == tool_name)` 线性扫描黑名单——黑名单通常很短，O(n) 可以接受。
+前两步是无条件拒绝。第一步检查 `denied_tools`——如果工具名在黑名单中，直接拒绝。注释 `#159` 说明这是第一道防线，优先于所有规则。`self.denied_tools.iter().any(|t| t == tool_name)` 线性扫描黑名单，黑名单通常很短，O(n) 可以接受。
 
 第二步检查 `deny_rules`——`find_matching_rule` 在 deny 规则列表中查找匹配的规则。如果找到，直接拒绝，错误消息包含原始规则字符串 `rule.raw`。
 
@@ -511,7 +511,7 @@ pub fn check(&self, tool_name: &str, input: &str) -> EnforcementResult {
 
 `Prompt` 模式直接返回 `Allowed`——交互确认由调用方负责，enforcer 不硬拒绝。enforcer 没有 prompter，无法做交互确认，因此 Prompt 模式下把决策权交给上层。
 
-其他模式下调用 `policy.authorize`——注意传 `None` 作为 prompter，这意味着 enforcer 层面的检查不会弹出交互确认。如果策略要求确认但没有 prompter，`prompt_or_deny` 会返回 `Deny`。
+其他模式下调用 `policy.authorize`，注意传 `None` 作为 prompter，所以 enforcer 层面的检查不会弹出交互确认。如果策略要求确认但没有 prompter，`prompt_or_deny` 会返回 `Deny`。
 
 ### check_with_required_mode
 
@@ -549,7 +549,7 @@ pub fn check_with_required_mode(
 }
 ```
 
-这个方法不查规则，只做权限级别比较——`active_mode >= required_mode`。如果当前级别满足动态要求的级别，允许；否则拒绝。这个方法被 `execute_tool_with_enforcer` 调用（第6章），用于 bash 命令分类后的权限检查——`classify_bash_permission` 把 `ls` 命令降级为 `WorkspaceWrite`，然后 `check_with_required_mode` 检查 `active_mode >= WorkspaceWrite`。
+这个方法不查规则，只做权限级别比较，`active_mode >= required_mode`。如果当前级别满足动态要求的级别，允许；否则拒绝。这个方法被 `execute_tool_with_enforcer` 调用（第6章），用于 bash 命令分类后的权限检查，`classify_bash_permission` 把 `ls` 命令降级为 `WorkspaceWrite`，然后 `check_with_required_mode` 检查 `active_mode >= WorkspaceWrite`。
 
 ### check_file_write：工作区边界检查
 
@@ -622,7 +622,7 @@ fn is_within_workspace(path: &str, workspace_root: &str) -> bool {
 }
 ```
 
-函数分三步。第一步拼接路径——如果是绝对路径（以 `/` 开头），直接使用；如果是相对路径，拼接到 workspace_root 后面。第二步词法规范化——`lexically_normalize` 折叠 `.` 和 `..` 但不访问文件系统。第三步比较——规范化后的路径等于 root 或以 `root/` 开头。`root_with_slash` 确保 `root` 以 `/` 结尾，避免 `/workspace-evil` 被误判为 `/workspace` 的子路径。
+函数分三步。第一步拼接路径——如果是绝对路径（以 `/` 开头），直接使用；如果是相对路径，拼接到 workspace_root 后面。第二步词法规范化——`lexically_normalize` 折叠 `.` 和 `..` 但不访问文件系统。第三步比较，规范化后的路径等于 root 或以 `root/` 开头。`root_with_slash` 确保 `root` 以 `/` 结尾，避免 `/workspace-evil` 被误判为 `/workspace` 的子路径。
 
 `lexically_normalize` 用栈算法折叠路径组件：
 
@@ -652,7 +652,7 @@ fn lexically_normalize(path: &str) -> String {
 
 `path.split('/')` 把路径按 `/` 分割为组件。`match` 处理每种组件：空字符串和 `.` 忽略（`.` 表示当前目录，无意义），`..` 弹出栈顶（回到上级目录），其他组件压入栈。
 
-`stack.pop()` 在栈为空时返回 `None` 但不报错——这意味着 `..` 超出根目录时被截断。词法规范化不访问文件系统——这是关键设计。写入操作的目标路径可能还不存在（新文件），无法用 `canonicalize` 解析符号链接。词法规范化不依赖文件系统存在性，始终能正确折叠 `..`。代价是无法检测符号链接逃逸——但 `resolve()` 可以在更高层做符号链接解析，两者互补。
+`stack.pop()` 在栈为空时返回 `None` 但不报错，所以 `..` 超出根目录时被截断。词法规范化不访问文件系统——这是关键设计。写入操作的目标路径可能还不存在（新文件），无法用 `canonicalize` 解析符号链接。词法规范化不依赖文件系统存在性，始终能正确折叠 `..`。代价是无法检测符号链接逃逸——但 `resolve()` 可以在更高层做符号链接解析，两者互补。
 
 ## 8.4 TrustResolver：工作区信任
 
@@ -703,108 +703,25 @@ pub enum TrustResolution {
 
 `TrustRequired` 在需要信任决策时发出。`TrustResolved` 在信任被解决时发出，携带应用的策略和解决方式。`TrustDenied` 在信任被拒绝时发出。这些事件可以被 SessionTracer 记录，用于后续审计。
 
-## 8.5 PolicyEngine：Lane 工作流策略
+## 8.5 PolicyEngine 与权限系统的关系
 
-`policy_engine.rs` 为 Lane 工作流（第12章展开）提供策略规则引擎：
+`policy_engine.rs` 为 Lane 工作流提供策略规则引擎，但其条件-动作评估模型与 `PermissionPolicy` 有结构相似性。两者都使用"条件匹配 → 动作执行"的模式：
 
-```rust
-// claw-code/rust/crates/runtime/src/policy_engine.rs
+- `PermissionPolicy` 的 `PermissionRule` 评估单次工具调用，条件面向工具名称和输入参数，动作是 Allow/Deny/Ask 决策。
+- `PolicyEngine` 的 `PolicyRule` 评估 Lane 生命周期状态，条件面向 `LaneContext`（green level、分支新鲜度、审查状态等），动作是 MergeToDev、Retry、CloseoutLane 等工作流操作。
 
-pub struct PolicyRule {
-    pub name: String,
-    pub condition: PolicyCondition,
-    pub action: PolicyAction,
-    pub priority: u32,
-}
-```
-
-`PolicyRule` 是条件-动作规则：当 `condition` 满足时，执行 `action`。`priority` 用于规则冲突时的优先级排序。
-
-`PolicyCondition` 支持组合逻辑和多种状态检查：
-
-```rust
-// claw-code/rust/crates/runtime/src/policy_engine.rs
-
-pub enum PolicyCondition {
-    And(Vec<PolicyCondition>),
-    Or(Vec<PolicyCondition>),
-    GreenAt { level: GreenLevel },
-    StaleBranch,
-    StartupBlocked,
-    LaneCompleted,
-    ReviewPassed,
-    ScopedDiff,
-    TimedOut { duration: Duration },
-    RetryAvailable,
-    RebaseRequired,
-    StaleCleanupRequired,
-    ApprovalTokenPresent,
-    ApprovalTokenMissing,
-}
-```
-
-`And` 和 `Or` 支持嵌套组合——可以构建复杂的复合条件。`GreenAt` 检查 Green Contract 满足级别。`StaleBranch` 检查分支是否超过 1 小时未更新。`LaneCompleted` 检查 Lane 是否已完成。`ReviewPassed` 检查代码审查是否通过。`TimedOut` 检查是否超过指定时长。`RetryAvailable` 检查重试次数是否未达上限。
-
-`matches` 方法递归评估条件：
-
-```rust
-// claw-code/rust/crates/runtime/src/policy_engine.rs
-
-impl PolicyCondition {
-    pub fn matches(&self, context: &LaneContext) -> bool {
-        match self {
-            Self::And(conditions) => conditions
-                .iter()
-                .all(|condition| condition.matches(context)),
-            Self::Or(conditions) => conditions
-                .iter()
-                .any(|condition| condition.matches(context)),
-            Self::GreenAt { level } => {
-                context.green_contract_satisfied && context.green_level >= *level
-            }
-            Self::StaleBranch => context.branch_freshness >= STALE_BRANCH_THRESHOLD,
-            // ... 其他变体
-        }
-    }
-}
-```
-
-`And` 用 `all` 短路——任一子条件不满足即返回 `false`。`Or` 用 `any` 短路——任一子条件满足即返回 `true`。这个设计与权限系统的 `PermissionRule` 类似，但面向的是工作流状态而非工具调用。
-
-`PolicyAction` 定义可执行的动作：
-
-```rust
-// claw-code/rust/crates/runtime/src/policy_engine.rs
-
-pub enum PolicyAction {
-    MergeToDev,
-    MergeForward,
-    RecoverOnce,
-    Retry { reason: String },
-    Rebase { reason: String },
-    Escalate { reason: String },
-    CloseoutLane,
-    CleanupSession,
-    CleanupStale { reason: String },
-    Reconcile { reason: ReconcileReason },
-    Notify { channel: String },
-    RequireApprovalToken { operation: String },
-}
-```
-
-这些动作对应 Lane 工作流的生命周期管理：合并到 dev、前向合并、恢复、重试、变基、升级、关闭 Lane、清理会话、协调、通知、要求审批令牌。
+这种相似性不是巧合——claw-code 的权限系统和协调器系统共享了"规则引擎"这一抽象，但面向不同的领域（安全授权 vs 工作流自动化）。`PolicyEngine` 的详细实现（包括 `PolicyCondition` 的组合逻辑、`LaneContext` 的 12 维状态快照、`PolicyAction::Chain` 的动作组合、`evaluate_with_events` 的评估流程）在第12章协调器中展开，与 `TaskRegistry` 和 `LaneBoard` 的协同工作一并分析。
 
 ## 小结
 
 权限系统在 Rust 端以 `PermissionMode`（`permissions.rs`）定义五级偏序模型（ReadOnly < WorkspaceWrite < DangerFullAccess，加 Prompt 和 Allow），`PermissionPolicy` 维护五组数据（active_mode、tool_requirements、allow/deny/ask 规则、denied_tools），`authorize_with_context` 按固定顺序执行多层检查：denied_tools → deny 规则 → 钩子覆盖 → ask 规则 → allow 规则/权限级别比较 → Prompt/权限升级确认 → 默认拒绝。`PermissionEnforcer`（`permission_enforcer.rs`）是执行层，`check_file_write` 用 `is_within_workspace` 做词法路径规范化（折叠 `.` 和 `..`，不访问文件系统），`check_bash` 用 `is_read_only_command` 做命令分类（shell 元字符检测 + git 白名单 + 解释器排除）。
 
-`TrustResolver`（`trust_resolver.rs`）在工作区层面做信任决策，通过白名单自动信任已知路径，未知路径需要用户手动审批。`PolicyEngine`（`policy_engine.rs`）为 Lane 工作流提供条件-动作规则引擎，支持组合逻辑（And/Or）和多种状态检查（GreenAt、StaleBranch、ReviewPassed 等）。
+`TrustResolver`（`trust_resolver.rs`）在工作区层面做信任决策，通过白名单自动信任已知路径，未知路径需要用户手动审批。`PolicyEngine`（`policy_engine.rs`）为 Lane 工作流提供条件-动作规则引擎，与 `PermissionPolicy` 共享"条件匹配 → 动作执行"的规则引擎抽象，但面向不同领域（工作流自动化 vs 安全授权），详细实现在第12章展开。
 
 | 关键文件 | 核心机制 | 对应章节 |
 | --- | --- | --- |
 | `rust/crates/runtime/src/permissions.rs` | `PermissionMode`、`PermissionPolicy`、规则引擎 | 8.1-8.2 |
 | `rust/crates/runtime/src/permission_enforcer.rs` | `PermissionEnforcer`、路径规范化、命令分类 | 8.3 |
 | `rust/crates/runtime/src/trust_resolver.rs` | `TrustPolicy`、`TrustAllowlistEntry` | 8.4 |
-| `rust/crates/runtime/src/policy_engine.rs` | `PolicyRule`、`PolicyCondition`、`PolicyAction` | 8.5 |
 
 下一章将分析会话管理——`Session` 结构如何存储对话历史，`ContentBlock` 枚举如何表示消息内容，以及 `compact_session` 如何在 token 超限前压缩历史。

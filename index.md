@@ -23,7 +23,7 @@ hero:
   <li><a href="/claw-code-book/chapter-01/what-is-agent"><span class="ch-num">第 1 章</span>什么是 Agent</a></li>
   <li><a href="/claw-code-book/chapter-02/architecture"><span class="ch-num">第 2 章</span>整体架构全景</a></li>
   <li><a href="/claw-code-book/chapter-03/startup"><span class="ch-num">第 3 章</span>启动流程</a></li>
-  <li><a href="/claw-code-book/chapter-04/config-layer"><span class="ch-num">第 4 章</span>配置系统</a></li>
+  <li><a href="/claw-code-book/chapter-04/config-layer"><span class="ch-num">第 4 章</span>配置系统：运行时契约与子系统集成</a></li>
   <li><a href="/claw-code-book/chapter-05/api"><span class="ch-num">第 5 章</span>API 通信与模型交互</a></li>
   <li><a href="/claw-code-book/chapter-06/tools"><span class="ch-num">第 6 章</span>工具系统</a></li>
   <li><a href="/claw-code-book/chapter-07/mcp"><span class="ch-num">第 7 章</span>MCP 协议与外部工具连接</a></li>

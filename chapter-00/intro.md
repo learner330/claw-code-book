@@ -61,6 +61,6 @@ cargo build --workspace
 
 ## 小结
 
-本章介绍了全书的两阶段结构：第 1-13 章聚焦 claw-code 核心架构的 Rust 源码，第 14-18 章转向对比、思维转型和生态展望。claw-code 是 Claude Code 的公开 Rust 实现，canonical runtime 位于 `rust/` workspace 中，本书以 Rust 实现为唯一源码依据。建议按顺序阅读，并在本地构建后对照源码。
+本章介绍了全书的两阶段结构：第 1-13 章聚焦 claw-code 核心架构的 Rust 源码，第 14 章总结全书并展望演进方向。claw-code 是 Claude Code 的公开 Rust 实现，canonical runtime 位于 `rust/` workspace 中，本书以 Rust 实现为唯一源码依据。建议按顺序阅读，并在本地构建后对照源码。
 
 下一章将建立 Agent 的概念框架，理解 Agent 与传统 CLI 的本质区别。

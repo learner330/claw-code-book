@@ -6,7 +6,7 @@
 
 ## 14.1 核心架构回顾
 
-claw-code 的 Rust 实现由 10 个 crate 组成，约 9.6 万行代码。核心模块的功能边界和相互关系：
+claw-code 的 Rust 实现由 10 个 crate 组成，约 11.6 万行代码。核心模块的功能边界和相互关系：
 
 | Crate | 核心模块 | 本书章节 |
 | --- | --- | --- |
@@ -61,7 +61,7 @@ claw-code 的社区扩展内容（本书定位为第二阶段）包括：
 
 **MCP 协议扩展**。当前 `McpServerManager` 只支持 `Stdio` 传输（第7章）。`Sse`、`Http`、`WebSocket`、`Sdk`、`ManagedProxy` 五种传输已在 `McpClientTransport` 枚举中定义，但管理器实现尚未完成。社区贡献可以补齐这些传输的完整生命周期管理。
 
-**Lane 工作流**。`PolicyEngine`（第8章）定义了条件-动作规则，但 Lane 工作流的完整实现（任务编排、分支管理、合并策略）是社区扩展内容。`TaskRegistry` 和 `TeamRegistry` 提供了基础状态管理，但工作流的调度逻辑需要额外实现。
+**Lane 工作流**。`PolicyEngine`（第12章）定义了条件-动作规则，与 `TaskRegistry` 和 `LaneBoard` 构成"状态-规则-动作"闭环。但 Lane 工作流的完整调度逻辑（任务编排、分支管理、合并策略）是社区扩展内容。`TaskRegistry` 和 `TeamRegistry` 提供了基础状态管理，但工作流的调度器需要额外实现。
 
 **多模型支持**。`ProviderClient` 当前支持 Anthropic、Xai、OpenAI 三端（第5章）。社区可以扩展更多 provider（如 Google Gemini、本地模型）。`ApiClient` trait 的接口设计是扩展点——新 provider 需要实现 `stream` 方法。
 
@@ -71,9 +71,9 @@ claw-code 的社区扩展内容（本书定位为第二阶段）包括：
 
 ## 14.4 从 claw-code 到 clawable
 
-claw-code 的终极目标是成为 clawable——一个可以被理解和修改的 Agent 系统。这意味着：
+claw-code 的终极目标是成为 clawable，一个可以被理解和修改的 Agent 系统。这要求：
 
-代码可审计。JSONL 会话文件提供完整审计轨迹（第9章）。`HookProgressEvent` 提供钩子执行记录（第10章）。`LaneBoard` 提供任务状态看板（第11章）。这些机制使 Agent 的决策过程透明化，工程师可以事后分析而非黑箱操作。
+代码可审计。JSONL 会话文件提供完整审计轨迹（第9章）。`HookProgressEvent` 提供钩子执行记录（第10章）。`LaneBoard` 提供任务状态看板（第11章）。这些机制使 Agent 的决策过程透明化，工程师可以事后分析，不必面对黑箱。
 
 配置可约束。`settings.json` 的权限规则（第8章）、钩子命令（第10章）、MCP 配置（第7章）允许用户定义行为边界。这些约束是声明式的，不需要修改代码就能调整 Agent 的行为策略。
 
@@ -99,6 +99,6 @@ claw-code 的终极目标是成为 clawable——一个可以被理解和修改�
 
 全书 15 章分析了 claw-code 的 Rust 实现——从启动到对话、从工具到权限、从会话到测试。核心架构围绕三个支柱：对话引擎（`ConversationRuntime` 的 Turn Loop）、安全边界（`PermissionPolicy` 的五级模型 + `HookRunner` 的干预机制）、可观测性（`Session` 的 JSONL 持久化 + `LaneBoard` 的任务看板 + `MockParityHarness` 的场景验证）。
 
-code 的演进方向是成为 clawable——可审计、可约束、可验证、可组合、可修改。这一目标不是通过增加功能实现，而是通过保持架构的透明性和模块化实现。每个模块有明确的职责边界、清晰的接口契约、和可观测的行为轨迹。
+code 的演进方向是成为 clawable——可审计、可约束、可验证、可组合、可修改。这一目标靠保持架构的透明性和模块化来实现，不靠增加功能。每个模块有明确的职责边界、清晰的接口契约、和可观测的行为轨迹。
 
 Agent 系统的工程挑战不在于让模型更聪明，而在于让系统的行为更可控、更透明、更可验证。claw-code 的架构设计正是围绕这一核心挑战展开——权限系统控制行为边界，会话系统记录行为轨迹，测试系统验证行为模式，扩展系统组合行为能力。理解这些设计意图，比记住任何实现细节都更重要。

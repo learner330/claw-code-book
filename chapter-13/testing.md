@@ -296,11 +296,11 @@ claw-code 是对 upstream TypeScript 参考实现的重写。重写的风险是�
 - **工具**：从 `src/tools.ts` 提取所有导入的工具符号
 - **启动阶段**：从 `src/entrypoints/cli.tsx` 提取快速路径分支
 
-提取后的清单与 Rust 端的 `CommandRegistry` 和 `ToolRegistry` 对比，生成覆盖率报告。这种审计不是行为测试（验证功能是否正确），而是存在性测试（验证功能是否存在）。
+提取后的清单与 Rust 端的 `CommandRegistry` 和 `ToolRegistry` 对比，生成覆盖率报告。这种审计属于存在性测试（验证功能是否存在），不属于行为测试（验证功能是否正确）。
 
 ## 13.4 路径解析：UpstreamPaths 的搜索策略
 
-`UpstreamPaths` 负责定位 upstream 仓库。搜索策略不是简单的相对路径，而是多候选者优先级搜索：
+`UpstreamPaths` 负责定位 upstream 仓库。搜索策略采用多候选者优先级搜索，不是简单的相对路径：
 
 ```rust
 // claw-code/rust/crates/compat-harness/src/lib.rs
@@ -547,7 +547,7 @@ fn imported_symbols(line: &str) -> Vec<String> {
 }
 ```
 
-这个解析器不是完整的 TypeScript 解析器，而是基于字符串匹配的启发式提取。它的假设是 upstream 的 import 语句遵循简单格式（没有复杂的解构或换行）。这个假设在实践中成立，因为 `commands.ts` 的导入通常是规范化的。
+这个解析器基于字符串匹配的启发式提取，并非完整的 TypeScript 解析器。它的假设是 upstream 的 import 语句遵循简单格式（没有复杂的解构或换行）。这个假设在实践中成立，因为 `commands.ts` 的导入通常是规范化的。
 
 `feature-gated` 命令的检测条件 `line.contains("feature('") && line.contains("./commands/")` 确保只捕获通过 `feature()` 函数动态加载的命令，而不是其他 feature 调用。`first_assignment_identifier` 提取赋值左侧的变量名——如 `const reviewCommand = feature('review', () => import('./commands/review'))` 中提取 `reviewCommand`。
 
@@ -669,7 +669,7 @@ pub fn extract_bootstrap_plan(source: &str) -> BootstrapPlan {
 2. **假阴性**：如果 upstream 修改了参数名（如 `--ver` 代替 `--version`），检测会失效
 3. **无法检测顺序**：快速路径的评估顺序（哪个先检查）无法从子字符串匹配中推断
 
-但这些局限性是可接受的，因为 `compat-harness` 的目标是"功能存在性审计"而非"行为正确性验证"。`BootstrapPlan::from_phases` 会自动去重和排序，确保构建的计划是有效的。
+但这些局限性是可接受的，因为 `compat-harness` 的目标是"功能存在性审计"，不是"行为正确性验证"。`BootstrapPlan::from_phases` 会自动去重和排序，确保构建的计划是有效的。
 
 ## 13.8 Registry 结构的跨模块复用
 

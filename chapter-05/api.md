@@ -160,7 +160,7 @@ pub struct MessageRequest {
 }
 ```
 
-`model` 和 `max_tokens` 是必填字段。`messages` 是对话历史列表。`system` 是系统提示词。`tools` 是工具定义列表——当这个字段为 `Some` 时，LLM 可以输出 tool call 请求。`tool_choice` 控制工具选择策略：`Auto`（模型自行决定）、`Any`（必须使用至少一个工具）、`Tool { name }`（强制使用指定工具）。
+`model` 和 `max_tokens` 是必填字段。`messages` 是对话历史列表。`system` 是系统提示词。`tools` 是工具定义列表，当这个字段为 `Some` 时，LLM 可以输出 tool call 请求。`tool_choice` 控制工具选择策略：`Auto`（模型自行决定）、`Any`（必须使用至少一个工具）、`Tool { name }`（强制使用指定工具）。
 
 `stream` 控制是否启用 SSE 流式输出。`temperature`、`top_p` 等是常规调参。`reasoning_effort` 是 OpenAI 兼容推理模型（如 `o4-mini`）特有的参数，取值为 `"low"`、`"medium"`、`"high"`。`extra_body` 是兜底机制——用户可以通过配置注入任意额外字段到请求体中，用于 Gateway 特性（如 `web_search_options`）或本地服务器的自定义开关。
 
@@ -179,7 +179,7 @@ pub struct InputMessage {
 }
 ```
 
-`role` 是 `"user"`、`"assistant"` 或 `"tool"`。`content` 是内容块列表—— Anthropic Messages API 支持一条消息包含多个内容块（如文本 + 工具调用）。
+`role` 是 `"user"`、`"assistant"` 或 `"tool"`。`content` 是内容块列表， Anthropic Messages API 支持一条消息包含多个内容块（如文本 + 工具调用）。
 
 `InputContentBlock` 枚举四种内容类型：
 

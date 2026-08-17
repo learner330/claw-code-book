@@ -119,7 +119,7 @@ pub struct McpToolCallContent {
 }
 ```
 
-`tools/call` 方法调用指定工具，`arguments` 是 JSON 参数对象。`content` 是结果内容列表——每个内容块有 `type`（如 `"text"`、`"image"`）和 `data`（扁平化的字段）。
+`tools/call` 方法调用指定工具，`arguments` 是 JSON 参数对象。`content` 是结果内容列表，每个内容块有 `type`（如 `"text"`、`"image"`）和 `data`（扁平化的字段）。
 
 资源读写：
 
@@ -633,7 +633,7 @@ impl PluginHooks {
 }
 ```
 
-`merged_with` 合并两个插件的钩子列表——简单追加。这意味着多个插件可以注册同一阶段的钩子，按顺序执行。与第10章的 `HookRunner` 对应——`HookRunner` 按 `commands` 列表顺序执行，插件钩子被追加到列表末尾。
+`merged_with` 合并两个插件的钩子列表，简单追加。多个插件因此可以注册同一阶段的钩子，按顺序执行。与第10章的 `HookRunner` 对应——`HookRunner` 按 `commands` 列表顺序执行，插件钩子被追加到列表末尾。
 
 ## 7.6 降级启动与韧性
 
@@ -672,7 +672,7 @@ pub struct McpDiscoveryFailure {
             });
 ```
 
-如果所有服务器都失败，不是降级启动而是完全失败。如果所有服务器都成功，是正常启动。`McpDegradedReport` 可以被上层（如 CLI 或协调器）消费，决定是否继续执行或通知用户。
+如果所有服务器都失败，则完全失败，不是降级启动。如果所有服务器都成功，是正常启动。`McpDegradedReport` 可以被上层（如 CLI 或协调器）消费，决定是否继续执行或通知用户。
 
 ## 小结
 

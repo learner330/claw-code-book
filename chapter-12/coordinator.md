@@ -285,7 +285,7 @@ pub enum TeamStatus {
 }
 ```
 
-`Team` 结构包含 `task_ids` 列表——一个团队关联多个任务。`TeamStatus` 与 `TaskStatus` 类似但少了 `Blocked` 和 `Stopped`。
+`Team` 结构包含 `task_ids` 列表，一个团队关联多个任务。`TeamStatus` 与 `TaskStatus` 类似但少了 `Blocked` 和 `Stopped`。
 
 `TeamRegistry` 使用同样的 `Arc<Mutex<Inner>>` 模式：
 
@@ -465,9 +465,164 @@ fn global_cron_registry() -> &'static CronRegistry {
 
 工具调用直接修改全局注册表，返回序列化的结果。这种设计简化了工具实现——不需要传递注册表引用，但代价是全局状态难以测试和模拟。
 
+## 12.5 Lane 工作流自动化：PolicyEngine
+
+`PolicyEngine` 是协调器系统的规则决策层。它与第8章的 `PermissionPolicy` 不同——`PermissionPolicy` 评估单次工具调用的授权，`PolicyEngine` 评估 Lane（工作流分支）的生命周期状态并决定自动化动作。`PolicyEngine` 的配置来自 `settings.json` 中的 `policy_rules` 字段（第4章），但评估逻辑完全在 `runtime::policy_engine.rs` 中实现。
+
+### 规则结构
+
+`PolicyRule` 是条件-动作三元组：
+
+```rust
+// claw-code/rust/crates/runtime/src/policy_engine.rs
+
+pub struct PolicyRule {
+    pub name: String,
+    pub condition: PolicyCondition,
+    pub action: PolicyAction,
+    pub priority: u32,
+}
+```
+
+`name` 用于诊断和日志。`condition` 决定规则是否触发。`action` 是触发后执行的操作。`priority` 控制评估顺序——数值越小优先级越高，在 `PolicyEngine::new` 中按优先级排序。
+
+### 条件系统
+
+`PolicyCondition` 支持组合逻辑和 Lane 状态检测：
+
+```rust
+// claw-code/rust/crates/runtime/src/policy_engine.rs
+
+pub enum PolicyCondition {
+    And(Vec<PolicyCondition>),
+    Or(Vec<PolicyCondition>),
+    GreenAt { level: GreenLevel },
+    StaleBranch,
+    StartupBlocked,
+    LaneCompleted,
+    LaneReconciled,
+    ReviewPassed,
+    ScopedDiff,
+    TimedOut { duration: Duration },
+    RetryAvailable,
+    RebaseRequired,
+    StaleCleanupRequired,
+    ApprovalTokenPresent,
+    ApprovalTokenMissing,
+}
+```
+
+`And` 和 `Or` 支持嵌套组合——`And(vec![GreenAt { level: 2 }, ScopedDiff, ReviewPassed])` 表示"测试通过、差异可控、且审查已批准"。`GreenAt` 检查 Lane 的 green level（测试质量等级）是否达到阈值。`StaleBranch` 检测分支是否超过 1 小时未更新。`ApprovalTokenPresent` / `ApprovalTokenMissing` 检查是否有操作审批令牌。
+
+`PolicyCondition::matches` 对 `LaneContext` 求值：
+
+```rust
+// claw-code/rust/crates/runtime/src/policy_engine.rs
+
+impl PolicyCondition {
+    pub fn matches(&self, context: &LaneContext) -> bool {
+        match self {
+            Self::And(conditions) => conditions
+                .iter()
+                .all(|condition| condition.matches(context)),
+            Self::Or(conditions) => conditions
+                .iter()
+                .any(|condition| condition.matches(context)),
+            Self::GreenAt { level } => {
+                context.green_contract_satisfied && context.green_level >= *level
+            }
+            Self::StaleBranch => context.branch_freshness >= STALE_BRANCH_THRESHOLD,
+            Self::StartupBlocked => context.blocker == LaneBlocker::Startup,
+            // ... 其他变体
+        }
+    }
+}
+```
+
+`LaneContext` 是 Lane 的完整状态快照：
+
+```rust
+// claw-code/rust/crates/runtime/src/policy_engine.rs
+
+pub struct LaneContext {
+    pub lane_id: String,
+    pub green_level: GreenLevel,
+    pub green_contract_satisfied: bool,
+    pub branch_freshness: Duration,
+    pub blocker: LaneBlocker,
+    pub review_status: ReviewStatus,
+    pub diff_scope: DiffScope,
+    pub completed: bool,
+    pub reconciled: bool,
+    pub retry_count: u32,
+    pub retry_limit: u32,
+    pub rebase_required: bool,
+    pub stale_cleanup_required: bool,
+    pub approval_token: Option<ApprovalToken>,
+}
+```
+
+这个结构包含 12 个状态字段，覆盖测试质量、分支新鲜度、阻塞状态、审查状态、重试次数、是否需要 rebase、是否需要清理、审批令牌等维度。`PolicyEngine` 不修改 `LaneContext`，只读取并输出动作列表，状态更新由调用方（`TaskRegistry`）执行。
+
+### 动作系统
+
+`PolicyAction` 定义 Lane 生命周期中的自动化操作：
+
+```rust
+// claw-code/rust/crates/runtime/src/policy_engine.rs
+
+pub enum PolicyAction {
+    MergeToDev,
+    MergeForward,
+    RecoverOnce,
+    Retry { reason: String },
+    Rebase { reason: String },
+    Escalate { reason: String },
+    CloseoutLane,
+    CleanupSession,
+    CleanupStale { reason: String },
+    Reconcile { reason: ReconcileReason },
+    Notify { channel: String },
+    RequireApprovalToken { operation: String },
+    Block { reason: String },
+    Chain(Vec<PolicyAction>),
+}
+```
+
+`Chain` 支持动作组合——`Chain(vec![CloseoutLane, CleanupSession])` 表示先关闭 Lane 再清理会话。`PolicyAction::flatten_into` 把嵌套链展开为扁平列表。
+
+### 评估流程
+
+`PolicyEngine::evaluate_with_events` 遍历按优先级排序的规则，对每条规则求值条件，匹配时展开动作并生成决策事件：
+
+```rust
+// claw-code/rust/crates/runtime/src/policy_engine.rs
+
+pub fn evaluate_with_events(engine: &PolicyEngine, context: &LaneContext) -> PolicyEvaluation {
+    let mut actions = Vec::new();
+    let mut events = Vec::new();
+    for rule in &engine.rules {
+        if rule.matches(context) {
+            let before = actions.len();
+            rule.action.flatten_into(&mut actions);
+            for action in &actions[before..] {
+                events.push(decision_event(rule, context, action));
+            }
+        }
+    }
+    PolicyEvaluation { actions, events }
+}
+```
+
+所有匹配的规则都会触发，不是"第一个匹配即停止"。多个规则可以同时生效，比如一个规则要求重试，另一个规则要求通知，两者都会出现在输出中。`PolicyEvaluation` 同时返回动作列表和事件列表，事件用于审计和日志，动作用于执行。
+
+`PolicyEngine` 与 `TaskRegistry` 和 `LaneBoard` 协同工作——`LaneBoard` 提供状态可视化，`TaskRegistry` 管理 Lane 生命周期，`PolicyEngine` 提供自动化决策。三者构成"状态-规则-动作"的闭环：Lane 状态变化 → PolicyEngine 评估 → 生成动作 → 执行动作 → 状态再次变化。
+
 ## 小结
 
 协调器系统在 Rust 端以三个线程安全的注册表实现：`TaskRegistry`（`task_registry.rs`）管理子 Agent 任务生命周期（Created → Running → Blocked → Completed/Failed/Stopped），`Arc<Mutex<RegistryInner>>` 模式提供共享状态，`lane_board` 按状态分组生成看板，`LaneHeartbeat` 检测僵死任务（Healthy/Stalled/TransportDead）。`TeamRegistry`（`team_cron_registry.rs`）管理团队分组，支持软删除（标记 Deleted）和硬删除（remove）。`CronRegistry` 管理周期性任务，记录 schedule、enabled、last_run_at、run_count，但不实现调度器——调度由外部触发。
+
+`PolicyEngine`（`policy_engine.rs`）提供 Lane 工作流的自动化决策——`PolicyRule` 的条件-动作三元组对 `LaneContext` 状态快照求值，所有匹配规则同时触发，`Chain` 支持动作组合。`PolicyEngine` 与 `TaskRegistry`、`LaneBoard` 构成"状态-规则-动作"闭环。
 
 三个注册表在 `tools` crate 中通过 `OnceLock` 提供全局单例，工具函数直接调用全局注册表进行 CRUD 操作。ID 生成格式为 `<type>_<timestamp>_<counter>`，counter 在 `Mutex` 保护下自增保证唯一性。
 
@@ -476,5 +631,6 @@ fn global_cron_registry() -> &'static CronRegistry {
 | `rust/crates/runtime/src/task_registry.rs` | `TaskRegistry`、`TaskStatus`、`LaneBoard`、`LaneHeartbeat` | 12.1 |
 | `rust/crates/runtime/src/team_cron_registry.rs` | `TeamRegistry`、`CronRegistry`、软删除/硬删除 | 12.2-12.3 |
 | `rust/crates/tools/src/lib.rs` | 全局 `OnceLock` 注册表、工具集成 | 12.4 |
+| `rust/crates/runtime/src/policy_engine.rs` | `PolicyRule`、`PolicyCondition`、`PolicyAction`、`LaneContext` | 12.5 |
 
 下一章将分析测试与质量保障——`MockParityHarness` 如何模拟 Anthropic 服务，`compat-harness` 如何做跨版本兼容性验证，以及 `run_mock_parity_harness.sh` 脚本如何端到端验证行为一致性。

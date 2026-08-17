@@ -30,11 +30,11 @@ pub struct ToolSpec {
 
 四个字段的含义和设计意图：
 
-`name` 用 `&'static str` 而不是 `String`。这意味着工具名在编译时就确定了，不需要堆分配。所有内置工具名（如 `"bash"`、`"read_file"`）都直接编译进二进制文件。
+`name` 用 `&'static str` 而不是 `String`，所以工具名在编译时就确定了，不需要堆分配。所有内置工具名（如 `"bash"`、`"read_file"`）都直接编译进二进制文件。
 
 `description` 也是 `&'static str`，原因相同。这个字段的内容会被发送给 LLM 作为工具说明——LLM 根据 description 决定何时使用这个工具。因此 description 的质量直接影响 Agent 的行为准确性。
 
-`input_schema` 是 `Value` 类型（`serde_json::Value`），包含 JSON Schema 格式的输入参数定义。LLM 根据 schema 生成符合格式的参数。`Value` 而非具体结构体是因为不同工具的参数结构差异巨大——`bash` 接受 `command` 字符串，`grep_search` 接受 `pattern` + `path` + `glob` + 多个 flag，用统一的 `Value` 避免为每个工具定义一个结构体。
+`input_schema` 是 `Value` 类型（`serde_json::Value`），包含 JSON Schema 格式的输入参数定义。LLM 根据 schema 生成符合格式的参数。用 `Value` 而不是具体结构体，是因为不同工具的参数结构差异巨大：`bash` 接受 `command` 字符串，`grep_search` 接受 `pattern` + `path` + `glob` + 多个 flag。统一的 `Value` 避免为每个工具定义一个结构体。
 
 `required_permission` 是 `PermissionMode` 枚举，定义该工具的静态权限要求。三个核心级别从低到高：`ReadOnly`（只读，如 `read_file`）、`WorkspaceWrite`（写工作区，如 `write_file`）、`DangerFullAccess`（完全访问，如 `bash`）。这个字段是静态声明——工具规格中写死的权限要求，但实际执行时可能被动态分类函数调整（6.5 节展开）。
 
@@ -52,7 +52,7 @@ pub struct RuntimeToolDefinition {
 }
 ```
 
-`Option<String>` 表示描述可以省略——运行时注册的工具（如 MCP 服务器提供的工具）不一定有描述。`String` 而非 `&'static str` 是因为这些工具名在运行时动态产生（如从 MCP 服务器的 JSON 响应中解析），编译时不存在。
+`Option<String>` 表示描述可以省略——运行时注册的工具（如 MCP 服务器提供的工具）不一定有描述。用 `String` 而不是 `&'static str`，是因为这些工具名在运行时动态产生（如从 MCP 服务器的 JSON 响应中解析），编译时不存在。
 
 ## 6.2 GlobalToolRegistry 三层注册
 
@@ -237,7 +237,7 @@ pub fn canonical_allowed_tool_name(value: &str) -> String {
 }
 ```
 
-这个函数的算法是逐字符扫描，在大写字母前插入下划线。但有一个条件：前一个字符必须是小写或数字，或者下一个字符是小写。这避免了在连续大写（如 `HTTPServer`）中每个字母间都插下划线——`HTTP` 会变成 `http` 而非 `h_t_t_p`。
+这个函数的算法是逐字符扫描，在大写字母前插入下划线。但有一个条件：前一个字符必须是小写或数字，或者下一个字符是小写。这避免了在连续大写（如 `HTTPServer`）中每个字母间都插下划线——`HTTP` 变成 `http`，不会变成 `h_t_t_p`。
 
 ## 6.3 内置工具清单与延迟发现
 
@@ -526,7 +526,7 @@ fn maybe_enforce_permission_check_with_mode(
 }
 ```
 
-`enforcer` 是 `Option<&PermissionEnforcer>`——可能存在也可能不存在。当 `enforcer` 为 `None` 时（如测试场景或未配置权限执行器），权限检查直接跳过，返回 `Ok(())`。当 `enforcer` 存在时，把输入 JSON 序列化为字符串，调用 `check_with_required_mode` 做权限判定。返回 `EnforcementResult` 枚举——`Allowed` 或 `Denied { reason }`。`Denied` 变体携带拒绝原因，作为错误返回给 LLM。
+`enforcer` 是 `Option<&PermissionEnforcer>`——可能存在也可能不存在。当 `enforcer` 为 `None` 时（如测试场景或未配置权限执行器），权限检查直接跳过，返回 `Ok(())`。当 `enforcer` 存在时，把输入 JSON 序列化为字符串，调用 `check_with_required_mode` 做权限判定。返回 `EnforcementResult` 枚举，`Allowed` 或 `Denied { reason }`。`Denied` 变体携带拒绝原因，作为错误返回给 LLM。
 
 ## 小结
 

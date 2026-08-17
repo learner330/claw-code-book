@@ -48,7 +48,7 @@ pub enum MessageRole {
 }
 ```
 
-`role` 区分发言者——`System` 是系统提示和压缩摘要，`User` 是用户输入，`Assistant` 是模型输出，`Tool` 是工具结果。`blocks` 是内容块列表——一条消息可以包含多个块（如文本 + 工具调用）。`usage` 是可选的 token 使用统计。
+`role` 区分发言者——`System` 是系统提示和压缩摘要，`User` 是用户输入，`Assistant` 是模型输出，`Tool` 是工具结果。`blocks` 是内容块列表，一条消息可以包含多个块（如文本 + 工具调用）。`usage` 是可选的 token 使用统计。
 
 `ConversationMessage` 提供构造函数：
 

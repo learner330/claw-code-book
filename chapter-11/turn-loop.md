@@ -4,7 +4,7 @@
 
 本章分析 claw-code 的核心运行机制——Turn Loop。对应第2章架构全景中的 `runtime` crate 的 `conversation.rs` 模块。
 
-Turn Loop 要解决的核心问题是：Agent 如何把"用户输入一句话"转化为"执行若干工具后给出最终回答"。这个过程不是一次性的请求-响应，而是一个循环——模型可能在一轮中请求多个工具，工具结果被送回模型，模型基于新信息继续推理，可能再请求工具，如此往复直到模型不再请求工具，给出最终文本回答。
+Turn Loop 要解决的核心问题是：Agent 如何把"用户输入一句话"转化为"执行若干工具后给出最终回答"。这个过程是一个循环，不是一次性的请求-响应。模型可能在一轮中请求多个工具，工具结果被送回模型，模型基于新信息继续推理，可能再请求工具，如此往复直到模型不再请求工具，给出最终文本回答。
 
 | 关键文件 | 职责 |
 | --- | --- |
@@ -26,7 +26,7 @@ pub struct ApiRequest {
 }
 ```
 
-只有两个字段：`system_prompt` 是系统提示词列表（每个元素是一段系统指令），`messages` 是对话消息列表。没有模型名、温度、max_tokens 等参数——这些由 `ApiClient` 的实现自行管理（如从配置中读取）。`ApiRequest` 只携带对话上下文，是接口的最小契约。
+只有两个字段：`system_prompt` 是系统提示词列表（每个元素是一段系统指令），`messages` 是对话消息列表。没有模型名、温度、max_tokens 等参数，这些由 `ApiClient` 的实现自行管理（如从配置中读取）。`ApiRequest` 只携带对话上下文，是接口的最小契约。
 
 `AssistantEvent` 是流式事件枚举，覆盖模型返回的所有内容类型：
 
@@ -50,7 +50,7 @@ pub enum AssistantEvent {
 }
 ```
 
-六个变体对应六种事件。`Thinking` 携带思考过程文本和可选签名——签名用于验证思考内容的完整性（extended thinking 特性）。`TextDelta` 是文本增量——模型输出的文本片段，需要累积拼接。`ToolUse` 是工具调用请求——`id` 用于关联工具结果，`name` 是工具名，`input` 是 JSON 格式的参数。`Usage` 携带 token 用量。`PromptCache` 携带 prompt cache 遥测事件。`MessageStop` 是消息结束标记——没有数据，只是一个信号。
+六个变体对应六种事件。`Thinking` 携带思考过程文本和可选签名——签名用于验证思考内容的完整性（extended thinking 特性）。`TextDelta` 是文本增量，即模型输出的文本片段，需要累积拼接。`ToolUse` 是工具调用请求——`id` 用于关联工具结果，`name` 是工具名，`input` 是 JSON 格式的参数。`Usage` 携带 token 用量。`PromptCache` 携带 prompt cache 遥测事件。`MessageStop` 是消息结束标记——没有数据，只是一个信号。
 
 `PromptCacheEvent` 记录 prompt cache 的命中异常：
 
@@ -84,9 +84,9 @@ pub trait ToolExecutor {
 }
 ```
 
-`ApiClient` 只有一个 `stream` 方法——接收 `ApiRequest`，返回 `Vec<AssistantEvent>`（事件列表）。`ToolExecutor` 只有一个 `execute` 方法——接收工具名和输入字符串，返回执行结果字符串。
+`ApiClient` 只有一个 `stream` 方法，接收 `ApiRequest`，返回 `Vec<AssistantEvent>`（事件列表）。`ToolExecutor` 只有一个 `execute` 方法，接收工具名和输入字符串，返回执行结果字符串。
 
-这两个 trait 非常简洁——各只有一个方法。泛型设计允许在生产环境注入真实的 HTTP 客户端和工具分发器，在测试环境注入模拟实现。因为 Rust 的泛型是编译期单态化的——每个具体的 `C` 和 `T` 组合会生成一份专门的代码，没有虚函数调用开销。
+这两个 trait 非常简洁——各只有一个方法。泛型设计允许在生产环境注入真实的 HTTP 客户端和工具分发器，在测试环境注入模拟实现。因为 Rust 的泛型是编译期单态化的，每个具体的 `C` 和 `T` 组合会生成一份专门的代码，没有虚函数调用开销。
 
 ### ConversationRuntime 结构体
 
@@ -152,9 +152,9 @@ pub fn run_turn(
     }
 ```
 
-`user_input: impl Into<String>` 是 Rust 的惯用写法——接受任何可以转换为 `String` 的类型（如 `&str`、`String`）。`impl Into<String>` 让调用方可以传 `&str` 或 `String`，不需要显式转换。
+`user_input: impl Into<String>` 是 Rust 的惯用写法，接受任何可以转换为 `String` 的类型（如 `&str`、`String`）。`impl Into<String>` 让调用方可以传 `&str` 或 `String`，不需要显式转换。
 
-`self.session.compaction.is_some()` 检查 session 是否有压缩记录。如果有，说明 session 之前被压缩过（可能因为上下文过长），需要先做健康检查——验证 tool executor 是否正常工作。如果压缩后的 session 状态不一致（如 tool executor 不可用），后续的工具调用会全部失败，不如提前检测。
+`self.session.compaction.is_some()` 检查 session 是否有压缩记录。如果有，说明 session 之前被压缩过（可能因为上下文过长），需要先做健康检查，验证 tool executor 是否正常工作。如果压缩后的 session 状态不一致（如 tool executor 不可用），后续的工具调用会全部失败，不如提前检测。
 
 健康探针的实现：
 
@@ -204,7 +204,7 @@ fn run_session_health_probe(&mut self) -> Result<(), String> {
         }
 ```
 
-`record_turn_started` 记录遥测事件（如果 tracer 存在）。`push_user_text` 把用户消息加入 session 的消息列表——返回 `Result`，`map_err` 把 session 错误转为 `RuntimeError`，`?` 在错误时提前返回。
+`record_turn_started` 记录遥测事件（如果 tracer 存在）。`push_user_text` 把用户消息加入 session 的消息列表，返回 `Result`，`map_err` 把 session 错误转为 `RuntimeError`，`?` 在错误时提前返回。
 
 循环开始前初始化四个累加器：`assistant_messages`（助手消息列表）、`tool_results`（工具结果列表）、`prompt_cache_events`（缓存事件列表）、`auto_compaction`（压缩事件）。这些累加器在循环中不断追加，最终组装为 `TurnSummary`。
 
@@ -268,7 +268,7 @@ fn run_session_health_probe(&mut self) -> Result<(), String> {
             .collect::<Vec<_>>();
 ```
 
-`filter_map` 是 `filter` + `map` 的组合——对每个 block 做模式匹配，`ToolUse` 变体提取三元组 `(id, name, input)`，其他变体返回 `None` 被过滤掉。这比先 `filter` 再 `map` 更高效——一次遍历完成两个操作。
+`filter_map` 是 `filter` + `map` 的组合，对每个 block 做模式匹配，`ToolUse` 变体提取三元组 `(id, name, input)`，其他变体返回 `None` 被过滤掉。这比先 `filter` 再 `map` 更高效——一次遍历完成两个操作。
 
 ### 阶段四：工具执行循环
 
@@ -282,7 +282,7 @@ fn run_session_health_probe(&mut self) -> Result<(), String> {
         }
 ```
 
-`break` 退出 `loop` 循环——模型不再请求工具，本轮 turn 完成。如果有工具调用，逐个执行：
+`break` 退出 `loop` 循环，模型不再请求工具，本轮 turn 完成。如果有工具调用，逐个执行：
 
 ```rust
 // claw-code/rust/crates/runtime/src/conversation.rs
@@ -298,7 +298,7 @@ fn run_session_health_probe(&mut self) -> Result<(), String> {
             );
 ```
 
-每个工具调用经过四个步骤。第一步前置钩子——`run_pre_tool_use_hook` 可以修改工具输入（`updated_input`）、覆盖权限决策（`permission_override`）、或直接取消工具调用。`effective_input` 是钩子可能修改后的输入——`map_or_else` 在 `updated_input` 返回 `None` 时用原始 `input.clone()`，返回 `Some` 时用钩子修改的值。
+每个工具调用经过四个步骤。第一步前置钩子——`run_pre_tool_use_hook` 可以修改工具输入（`updated_input`）、覆盖权限决策（`permission_override`）、或直接取消工具调用。`effective_input` 是钩子可能修改后的输入，`map_or_else` 在 `updated_input` 返回 `None` 时用原始 `input.clone()`，返回 `Some` 时用钩子修改的值。
 
 第二步权限检查，有四条分支：
 
@@ -486,9 +486,9 @@ fn build_assistant_message(
     }
 ```
 
-函数维护两个缓冲区：`text` 累积文本增量，`blocks` 存储已完成的 content block。`finished` 标记是否收到 `MessageStop` 事件——如果没有收到，视为流截断，返回错误。
+函数维护两个缓冲区：`text` 累积文本增量，`blocks` 存储已完成的 content block。`finished` 标记是否收到 `MessageStop` 事件。如果没有收到，视为流截断，返回错误。
 
-`match event` 对六种事件做不同处理。`TextDelta` 把文本增量追加到 `text` 缓冲区。`Thinking` 和 `ToolUse` 在加入 blocks 前先调用 `flush_text_block`——把累积的文本刷入 blocks，确保文本块在思考块或工具块之前。
+`match event` 对六种事件做不同 `TextDelta` 把文本增量追加到 `text` 缓冲区。`Thinking` 和 `ToolUse` 在加入 blocks 前先调用 `flush_text_block`——把累积的文本刷入 blocks，确保文本块在思考块或工具块之前。
 
 `flush_text_block` 是辅助函数：
 
@@ -707,7 +707,7 @@ impl ToolExecutor for StaticToolExecutor {
 
 `type ToolHandler = Box<dyn FnMut(&str) -> Result<String, ToolError>>` 是类型别名——`Box<dyn FnMut(...)>` 是一个堆分配的、可变的闭包。`FnMut` 表示闭包可以修改捕获的变量。`'static` 生命周期约束表示闭包不借用任何非静态引用。
 
-`handlers: BTreeMap<String, ToolHandler>` 用 `BTreeMap` 而非 `HashMap`——`BTreeMap` 按键排序，测试输出确定性强。`register` 方法接收闭包，用 `Box::new(handler)` 把闭包装箱为 trait object。返回 `self` 支持链式注册：
+`handlers: BTreeMap<String, ToolHandler>` 用 `BTreeMap` 而不是 `HashMap`，因为 `BTreeMap` 按键排序，测试输出确定性强。`register` 方法接收闭包，用 `Box::new(handler)` 把闭包装箱为 trait object。返回 `self` 支持链式注册：
 
 ```rust
 let executor = StaticToolExecutor::new()

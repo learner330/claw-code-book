@@ -175,7 +175,7 @@ enum CliAction {
 }
 ```
 
-每个枚举变体对应一种 CLI 行为，变体携带的数据就是该行为所需的全部参数。Rust 的 `match` 是穷尽的——编译器强制处理所有枚举变体，否则编译不通过。这意味着如果未来新增了一个 `CliAction` 变体但忘了在 `match` 中处理，编译阶段就会报错。
+每个枚举变体对应一种 CLI 行为，变体携带的数据就是该行为所需的全部参数。Rust 的 `match` 是穷尽的——编译器强制处理所有枚举变体，否则编译不通过。如果未来新增了一个 `CliAction` 变体但忘了在 `match` 中处理，编译阶段就会报错。
 
 `CliAction::Prompt` 是最核心的变体——用户输入 `claw "帮我写一个快速排序"` 时就走这个分支。`LiveCli::new()` 在这个分支中被调用，完成完整的运行时初始化：
 
@@ -422,7 +422,7 @@ fn emit_config_warning_once(warning: &str) {
 
 `SUPPRESS_CONFIG_WARNINGS_STDERR` 就是 3.2 节中 `suppress_config_warnings_for_json_mode()` 设置的原子布尔值。当 JSON 模式开启时，警告直接丢弃。`guard.insert()` 返回 `true` 表示集合中之前没有这个警告（首次出现），输出到 stderr；返回 `false` 表示重复警告，跳过。
 
-第四，MCP 服务器合并（`merge_mcp_servers`）。MCP 配置不是简单的键值对，而是嵌套的服务器定义，需要专门的合并逻辑。
+第四，MCP 服务器合并（`merge_mcp_servers`）。MCP 配置是嵌套的服务器定义，不是简单的键值对，需要专门的合并逻辑。
 
 第五，深度合并（`deep_merge_objects`）。递归地合并两个 JSON 对象：对于同名键，如果两个值都是对象，递归合并；否则后加载的值直接覆盖先加载的值。
 
@@ -632,11 +632,88 @@ impl PermissionModeSource {
 }
 ```
 
-当 `source` 是 `Default` 时，`is_explicit()` 返回 `false`，表示权限模式不是用户主动选择的，而是系统回退到默认值。这个信息在 `claw status` 中展示，提醒用户当前权限是默认值而非显式选择。
+当 `source` 是 `Default` 时，`is_explicit()` 返回 `false`，表示权限模式是系统回退到默认值，不是用户主动选择。这个信息在 `claw status` 中展示，提醒用户当前权限是默认值，不是显式选择。
+
+## 3.6 CLI 交互层：Commands 解析与 Skills 分发
+
+CLI 入口 `main.rs` 接收用户输入后，需要将文本命令解析为结构化操作。这一层包括斜杠命令（`/command`）的解析分发和 Skills 的发现与调用。
+
+### 斜杠命令解析
+
+`SlashCommand` 枚举在类型层面保证参数合法性：
+
+```rust
+// claw-code/rust/crates/commands/src/lib.rs
+
+pub enum SlashCommand {
+    Help,
+    Status,
+    Sandbox,
+    Compact,
+    Model { model: Option<String> },
+    Permissions { mode: Option<PermissionMode> },
+    Clear { confirm: bool },
+    Cost,
+    Resume { session_path: Option<String> },
+    Config { section: Option<ConfigSection> },
+    Mcp { subcommand: Option<McpSubcommand> },
+    Memory,
+    Init,
+    Diff,
+    Version,
+    Bughunter { scope: Option<String> },
+    Commit,
+    Pr { context: Option<String> },
+    Issue { context: Option<String> },
+    Ultraplan { task: Option<String> },
+    Teleport { target: Option<String> },
+    DebugToolCall,
+    Export { path: Option<String> },
+    Session { subcommand: SessionSubcommand },
+    Plugin { subcommand: PluginSubcommand },
+    Agents { args: Option<String> },
+    Skills { args: Option<String> },
+    Doctor,
+    // ... 更多变体
+}
+```
+
+每个变体携带已解析的参数。`Model { model: Option<String> }` 中的 `Option` 表示参数可选——`/model` 不带参数时查询当前模型，`/model sonnet` 时切换模型。解析失败时提前返回错误，不会传递到执行阶段。
+
+解析函数是命令名到变体的映射，`optional_single_arg` 解析零个或一个参数，`parse_permissions_mode` 把字符串映射到 `PermissionMode` 枚举，子命令（`session`、`plugin`）有独立的解析函数处理更复杂的参数结构。
+
+### 分发层的设计
+
+解析后的 `SlashCommand` 被分发到运行时操作。分发逻辑不在 `commands` crate 中——`commands` crate 只负责解析，`rusty-claude-cli` 或 `runtime` 负责执行。这种设计保持 `commands` crate 的纯粹性（无运行时依赖），让解析逻辑可以被独立测试。
+
+部分命令修改运行时状态但不修改配置文件：`/permissions workspace-write` 只修改当前会话的 `active_mode`，不写入 `settings.json`。`/model sonnet` 同理。`config` 命令（`/config inspect`）则只读配置，不修改状态。这种"配置持久化、运行时状态临时化"的设计原则与 Bootstrap 流程中的来源追踪一致——命令系统只操作最顶层的运行时状态。
+
+### Skills 发现与调用
+
+Skills 是可组合的命令能力单元，与插件（第7章）不同——skills 不通过 `plugin.json` 和生命周期钩子定义，而是通过目录结构和 Markdown frontmatter 定义，更轻量、更易于分发。
+
+`SkillCollection` 遍历技能根目录，读取每个子目录中的 Markdown 文件 frontmatter（`name`、`description` 等字段），构建 `SkillSummary` 列表。`shadowed_by` 记录同名覆盖关系，`origin` 区分来源（标准技能目录或遗留命令目录），`metadata_drift` 收集 frontmatter 名称与目录名不一致的条目。
+
+Skills 通过 `/skills <name> [args]` 调用。`SkillSlashDispatch` 决定调用方式：
+
+```rust
+// claw-code/rust/crates/commands/src/lib.rs
+
+pub enum SkillSlashDispatch {
+    Local,
+    Invoke(String),
+}
+```
+
+`Local` 在当前对话上下文中执行 skill 的 prompt 模板，`Invoke` 通过指定路径启动外部进程。`SkillInstallSource` 区分目录安装（包含 `prompt.md` 和元数据）和单文件安装（frontmatter 中包含元数据）。
+
+Skills 系统与插件系统的关系：skills 是"轻量级命令能力"，插件是"重量级扩展包"。一个插件可以包含多个技能，但技能不依赖插件的生命周期管理。这种分层让简单的命令能力不需要完整的插件基础设施。
 
 ## 小结
 
 claw-code 的启动流程从 CLI 入口到 Turn Loop 分为多个阶段。CLI 入口 `main.rs` 用 `CliAction` 枚举和穷尽 `match` 匹配分发命令，编译时保证所有分支被处理。Bootstrap 由 `BootstrapPlan` 按阶段编排，默认包含 12 个阶段，从 `CliEntry` 到 `MainRuntime`，`from_phases` 方法自动去重保证安全。配置加载由 `ConfigLoader` 的 `discover()` 发现五个配置文件（三个层级，每层新旧两种格式），`load()` 逐个读取并通过 `deep_merge_objects` 递归合并，同时进行 schema 验证和 MCP 服务器合并，`ConfigFileReport` 记录每个键的覆盖关系。模型和权限的来源通过四级溯源（Flag → Env → Config → Default）记录，`claw status` 命令可展示完整来源链。
+
+CLI 交互层中，`SlashCommand` 枚举在类型层面保证参数合法性，解析失败时提前返回错误；`commands` crate 保持无运行时依赖的纯粹性，解析结果由 `rusty-claude-cli` 或 `runtime` 执行。Skills 是可组合的轻量级命令能力，通过目录结构和 Markdown frontmatter 定义，`SkillSlashDispatch` 支持本地执行和外部调用两种模式。
 
 | 关键文件 | 核心机制 | 对应章节 |
 | --- | --- | --- |
@@ -644,5 +721,6 @@ claw-code 的启动流程从 CLI 入口到 Turn Loop 分为多个阶段。CLI �
 | `runtime/src/bootstrap.rs` | `BootstrapPhase`，`BootstrapPlan` | 本章 3.3 |
 | `runtime/src/config.rs` | `ConfigLoader`，三层合并，`ConfigFileReport` | 本章 3.4 |
 | `rusty-claude-cli/src/main.rs` | `ModelProvenance`，`PermissionModeProvenance` | 本章 3.5 |
+| `commands/src/lib.rs` | `SlashCommand` 枚举、参数解析、Skills 发现与分发 | 本章 3.6 |
 
 下一章将分析配置系统——`ConfigLoader` 如何发现三层配置文件、`deep_merge_objects` 如何递归合并、以及合并后的配置如何成为各子系统的运行时契约。

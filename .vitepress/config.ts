@@ -25,7 +25,7 @@ export default defineConfig({
       { text: '第 1 章 什么是 Agent', link: '/chapter-01/what-is-agent' },
       { text: '第 2 章 整体架构全景', link: '/chapter-02/architecture' },
       { text: '第 3 章 启动流程', link: '/chapter-03/startup' },
-      { text: '第 4 章 配置系统', link: '/chapter-04/config-layer' },
+      { text: '第 4 章 配置系统：运行时契约与子系统集成', link: '/chapter-04/config-layer' },
       { text: '第 5 章 API 通信与模型交互', link: '/chapter-05/api' },
       { text: '第 6 章 工具系统', link: '/chapter-06/tools' },
       { text: '第 7 章 MCP 协议与外部工具连接', link: '/chapter-07/mcp' },

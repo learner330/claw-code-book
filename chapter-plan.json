@@ -46,7 +46,7 @@
     },
     {
       "number": 4,
-      "title": "配置系统：三层合并与运行时契约",
+      "title": "配置系统：运行时契约与子系统集成",
       "km_doc_id": "2755143810",
       "source_files": [
         "rust/crates/runtime/src/config.rs",
