@@ -2,9 +2,8 @@
 
 ## 本章概览
 
-本章是全书的模块索引。目标是读完之后能在脑中画出 claw-code 的模块关系图，知道每个 crate 的名字、位置、职责，以及各章分别分析哪个模块。
+本章是全书的模块索引，目的是方便读者知道每个 crate 的名字、位置、职责，以及各章分别分析哪个模块。
 
-claw-code 的 canonical runtime 是一个 Cargo workspace，位于 `rust/` 目录下，包含 10 个 crate、约 11.6 万行 Rust 代码。本章不展开任何模块的源码实现，只建立空间感和索引关系。
 
 ## 2.1 Rust Workspace 概述
 

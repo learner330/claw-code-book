@@ -45,22 +45,9 @@ Rust workspace 的核心 crate 包括：
 
 ## 0.3 阅读建议
 
-本书面向有系统开发经验的工程师。假设读者熟悉常见的服务端开发模式，但不了解 LLM 和 Agent 的内部实现。
-
-按章节顺序阅读效果最好。前 3 章建立全局认知，第 4-13 章逐模块深入源码，第 14 章总结全书并展望。
+读者最好能了解 Rust 的基本语法，以便重点理解设计思路和模块边界。
 
 每章的代码片段均来自 `claw-code/rust/` 目录下的实际文件，标注了文件路径。建议在本地打开源码对照阅读。对于 Rust 代码，不需要深入掌握 Rust 语法，重点是理解设计思路和模块边界。
 
-建议配合本地构建使用：
-
-```bash
-cd claw-code/rust
-cargo build --workspace
-./target/debug/claw doctor
-```
-
-## 小结
-
-本章介绍了全书的两阶段结构：第 1-13 章聚焦 claw-code 核心架构的 Rust 源码，第 14 章总结全书并展望演进方向。claw-code 是 Claude Code 的公开 Rust 实现，canonical runtime 位于 `rust/` workspace 中，本书以 Rust 实现为唯一源码依据。建议按顺序阅读，并在本地构建后对照源码。
 
 下一章将建立 Agent 的概念框架，理解 Agent 与传统 CLI 的本质区别。

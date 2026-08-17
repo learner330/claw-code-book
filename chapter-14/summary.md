@@ -57,7 +57,7 @@ claw-code 的 Rust 实现由 10 个 crate 组成，约 11.6 万行代码。核�
 
 ## 14.3 社区扩展方向
 
-claw-code 的社区扩展内容（本书定位为第二阶段）包括：
+claw-code 的社区扩展内容包括：
 
 **MCP 协议扩展**。当前 `McpServerManager` 只支持 `Stdio` 传输（第7章）。`Sse`、`Http`、`WebSocket`、`Sdk`、`ManagedProxy` 五种传输已在 `McpClientTransport` 枚举中定义，但管理器实现尚未完成。社区贡献可以补齐这些传输的完整生命周期管理。
 
