@@ -3,4 +3,7 @@ node_modules
 .vitepress/cache
 .DS_Store
 claw-code
+笔记
+.catpaw
+writing-guide.md
 
