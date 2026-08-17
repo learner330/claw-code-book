@@ -25,12 +25,12 @@ unsafe_code = "forbid"
 
 | crate | 路径 | 职责 | 代码规模 | 对应章节 |
 | --- | --- | --- | --- | --- |
-| `runtime` | `rust/crates/runtime/` | 核心运行时：配置加载、Bootstrap、会话管理、权限引擎、MCP 通信、任务注册表、文件操作、Bash 执行 | ~41,700 LOC | 第4、7、8、9、10、11、12章 |
-| `rusty-claude-cli` | `rust/crates/rusty-claude-cli/` | CLI 入口、参数解析、TUI 渲染、模型/权限溯源 | ~30,800 LOC | 第3、4章 |
+| `runtime` | `rust/crates/runtime/` | 核心运行时：配置加载、Bootstrap、会话管理、权限引擎、MCP 通信、任务注册表、文件操作、Bash 执行 | ~41,700 LOC | 第3、4、7、8、9、10、11、12章 |
+| `rusty-claude-cli` | `rust/crates/rusty-claude-cli/` | CLI 入口、参数解析、TUI 渲染、模型/权限溯源 | ~30,800 LOC | 第3章 |
 | `api` | `rust/crates/api/` | HTTP 客户端、SSE 流式解析、多 provider 路由、prompt cache | ~11,900 LOC | 第5章 |
 | `tools` | `rust/crates/tools/` | 内置工具实现：文件操作、Bash 执行、代码搜索、任务调度等 40 个工具规范 | ~11,800 LOC | 第6章 |
-| `commands` | `rust/crates/commands/` | `/` 斜杠命令定义和分发 | ~7,200 LOC | 第16章 |
-| `plugins` | `rust/crates/plugins/` | 插件系统：安装、启用、禁用、生命周期管理、bundled hooks | ~4,500 LOC | 第9、12章 |
+| `commands` | `rust/crates/commands/` | `/` 斜杠命令定义和分发 | ~7,200 LOC | 第4章 |
+| `plugins` | `rust/crates/plugins/` | 插件系统：安装、启用、禁用、生命周期管理、bundled hooks | ~4,500 LOC | 第7、10章 |
 | `claw-analog` | `rust/crates/claw-analog/` | 轻量级代理外壳，适合 CI 和脚本场景 | ~4,800 LOC | — |
 | `claw-rag-service` | `rust/crates/claw-rag-service/` | RAG 索引服务，基于 SQLite 的语义搜索 | ~1,100 LOC | — |
 | `mock-anthropic-service` | `rust/crates/mock-anthropic-service/` | 确定性 mock 服务，用于测试 harness | ~1,200 LOC | 第13章 |
@@ -68,15 +68,18 @@ graph TD
 
 | 数据流节点 | 对应章节 | 对应模块 |
 | --- | --- | --- |
-| CLI 入口和参数解析 | 第4章 | `rusty-claude-cli` |
-| Bootstrap 多阶段引导 | 第4章 | `runtime::bootstrap` |
-| 配置三层合并 | 第4章 | `runtime::config` |
+| CLI 入口和参数解析 | 第3章 | `rusty-claude-cli` |
+| Bootstrap 多阶段引导 | 第3章 | `runtime::bootstrap` |
+| 配置三层合并 | 第3章 | `runtime::config` |
+| 配置运行时契约 | 第4章 | `runtime::config` + `commands` |
 | API 通信与 SSE 流 | 第5章 | `api` crate |
 | 工具注册与执行 | 第6章 | `tools` crate |
-| MCP 工具发现 | 第12章 | `runtime::mcp_stdio` |
+| MCP 工具发现 | 第7章 | `runtime::mcp_stdio` |
 | 权限初始化与检查 | 第8章 | `runtime::permission_enforcer` |
-| 会话创建与持久化 | 第10章 | `runtime::session` |
-| Turn Loop 循环 | 第7章 | `runtime::conversation` |
+| 会话创建与持久化 | 第9章 | `runtime::session` |
+| 钩子拦截 | 第10章 | `runtime::hooks` |
+| Turn Loop 循环 | 第11章 | `runtime::conversation` |
+| 多 Agent 协调 | 第12章 | `runtime::task_registry` |
 
 ## 2.3 各章与模块的对应关系
 
@@ -86,22 +89,18 @@ graph TD
 | --- | --- | --- | --- |
 | 第1章 | 什么是 Agent | — | Agent 和传统 CLI 有什么不同 |
 | 第2章 | 整体架构全景 | — | 模块如何划分，数据如何流动 |
-| 第3章 | 启动到第一条消息 | `rusty-claude-cli` + `runtime` | 一条命令经过哪些模块 |
-| 第4章 | 启动流程深度解析 | `rusty-claude-cli` + `runtime::bootstrap` + `runtime::config` | Bootstrap 如何工作，配置如何合并 |
+| 第3章 | 启动流程 | `rusty-claude-cli` + `runtime::bootstrap` + `runtime::config` | Bootstrap 如何工作，配置如何合并 |
+| 第4章 | 配置系统 | `runtime::config` + `commands` | 配置契约、规则引擎、命令分发 |
 | 第5章 | API 通信与模型交互 | `api` crate | 如何与 LLM 建立 SSE 流式连接 |
 | 第6章 | 工具系统 | `tools` crate | Agent 如何定义和执行 40 个工具 |
-| 第7章 | Turn Loop 与对话引擎 | `runtime::conversation` | Agent 如何循环决策 |
+| 第7章 | MCP 协议与外部工具 | `runtime::mcp_*` + `plugins` | 如何连接外部工具和扩展 |
 | 第8章 | 权限系统 | `runtime::permission_enforcer` | 如何限制 Agent 的操作范围 |
-| 第9章 | 钩子系统 | `runtime::hooks` + `plugins::hooks` | 如何在关键节点插入处理 |
-| 第10章 | 会话管理 | `runtime::session` + `runtime::compact` | 如何维护对话历史 |
-| 第11章 | 协调器 | `runtime::task_registry` + `runtime::team_cron_registry` | 多 Agent 如何分工 |
-| 第12章 | MCP 协议与插件扩展 | `runtime::mcp_*` + `plugins` | 如何连接外部工具和扩展 |
-| 第13章 | 测试与质量保障 | `mock-anthropic-service` + `compat-harness` | 如何保证行为正确性 |
-| 第14章 | 三端对比 | `compat-harness` + `native_ts/` | 三种实现的差异 |
-| 第15章 | 思维转型 | — | Java 工程师的认知转变 |
-| 第16章 | 配置层 | `runtime::config` + `commands` | Rules、Commands、MCP、Skills |
-| 第17章 | 工程工作流 | — | AI-Native 工作模式 |
-| 第18章 | 总结与展望 | — | 从 claw-code 到 clawable |
+| 第9章 | 会话管理 | `runtime::session` + `runtime::compact` | 如何维护对话历史 |
+| 第10章 | 钩子系统 | `runtime::hooks` + `plugins::hooks` | 如何在关键节点插入处理 |
+| 第11章 | Turn Loop 与对话引擎 | `runtime::conversation` | Agent 如何循环决策 |
+| 第12章 | 协调器 | `runtime::task_registry` + `runtime::team_cron_registry` | 多 Agent 如何分工 |
+| 第13章 | 测试与源码审计 | `mock-anthropic-service` + `compat-harness` | 如何保证行为正确性和覆盖率 |
+| 第14章 | 总结与展望 | — | 核心架构回顾与演进方向 |
 
 ## 小结
 

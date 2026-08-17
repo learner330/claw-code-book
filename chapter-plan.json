@@ -34,27 +34,27 @@
     },
     {
       "number": 3,
-      "title": "启动到第一条消息：端到端流程概述",
+      "title": "启动流程：从 CLI 到第一条消息",
       "km_doc_id": "2754537617",
       "source_files": [
         "rust/crates/rusty-claude-cli/src/main.rs",
         "rust/crates/runtime/src/bootstrap.rs",
-        "rust/crates/runtime/src/conversation.rs",
-        "rust/crates/api/src/client.rs"
+        "rust/crates/runtime/src/config.rs"
       ],
-      "output_path": "chapter-03/architecture.md",
+      "output_path": "chapter-03/startup.md",
       "status": "pending"
     },
     {
       "number": 4,
-      "title": "启动流程深度解析：Bootstrap 七阶段与配置合并",
-      "km_doc_id": "2754537617",
+      "title": "配置系统：三层合并与运行时契约",
+      "km_doc_id": "2755143810",
       "source_files": [
-        "rust/crates/runtime/src/bootstrap.rs",
         "rust/crates/runtime/src/config.rs",
-        "rust/crates/rusty-claude-cli/src/main.rs"
+        "rust/crates/runtime/src/config_validate.rs",
+        "rust/crates/runtime/src/policy_engine.rs",
+        "rust/crates/commands/src/lib.rs"
       ],
-      "output_path": "chapter-04/startup.md",
+      "output_path": "chapter-04/config-layer.md",
       "status": "pending"
     },
     {
@@ -85,18 +85,20 @@
     },
     {
       "number": 7,
-      "title": "Turn Loop 与对话引擎：Conversation Runtime",
-      "km_doc_id": "2754337746",
+      "title": "MCP 协议与外部工具连接",
+      "km_doc_id": "2754947156",
       "source_files": [
-        "rust/crates/runtime/src/conversation.rs",
-        "rust/crates/runtime/src/prompt.rs"
+        "rust/crates/runtime/src/mcp_tool_bridge.rs",
+        "rust/crates/runtime/src/mcp_stdio.rs",
+        "rust/crates/runtime/src/mcp_client.rs",
+        "rust/crates/plugins/src/lib.rs"
       ],
-      "output_path": "chapter-07/turn-loop.md",
+      "output_path": "chapter-07/mcp.md",
       "status": "pending"
     },
     {
       "number": 8,
-      "title": "权限系统：PermissionEnforcer 与路径边界",
+      "title": "权限系统：Agent 的安全边界",
       "km_doc_id": "2754857217",
       "source_files": [
         "rust/crates/runtime/src/permission_enforcer.rs",
@@ -109,17 +111,6 @@
     },
     {
       "number": 9,
-      "title": "钩子系统：Hook 注册与生命周期",
-      "km_doc_id": "2754397994",
-      "source_files": [
-        "rust/crates/runtime/src/hooks.rs",
-        "rust/crates/plugins/src/hooks.rs"
-      ],
-      "output_path": "chapter-09/hooks.md",
-      "status": "pending"
-    },
-    {
-      "number": 10,
       "title": "会话管理：Session 状态机与自动压缩",
       "km_doc_id": "2754258146",
       "source_files": [
@@ -127,36 +118,45 @@
         "rust/crates/runtime/src/compact.rs",
         "rust/crates/runtime/src/session_control.rs"
       ],
-      "output_path": "chapter-10/session.md",
+      "output_path": "chapter-09/session.md",
+      "status": "pending"
+    },
+    {
+      "number": 10,
+      "title": "钩子系统：用户自定义拦截",
+      "km_doc_id": "2754397994",
+      "source_files": [
+        "rust/crates/runtime/src/hooks.rs",
+        "rust/crates/plugins/src/hooks.rs"
+      ],
+      "output_path": "chapter-10/hooks.md",
       "status": "pending"
     },
     {
       "number": 11,
+      "title": "Turn Loop 与对话引擎：Conversation Runtime",
+      "km_doc_id": "2754337746",
+      "source_files": [
+        "rust/crates/runtime/src/conversation.rs",
+        "rust/crates/runtime/src/prompt.rs"
+      ],
+      "output_path": "chapter-11/turn-loop.md",
+      "status": "pending"
+    },
+    {
+      "number": 12,
       "title": "协调器：TaskRegistry 与 Team/Cron 编排",
       "km_doc_id": "2754737259",
       "source_files": [
         "rust/crates/runtime/src/task_registry.rs",
         "rust/crates/runtime/src/team_cron_registry.rs"
       ],
-      "output_path": "chapter-11/coordinator.md",
-      "status": "pending"
-    },
-    {
-      "number": 12,
-      "title": "MCP 协议与插件扩展：McpToolRegistry 与 Lifecycle",
-      "km_doc_id": "2754947156",
-      "source_files": [
-        "rust/crates/runtime/src/mcp_tool_bridge.rs",
-        "rust/crates/runtime/src/mcp_stdio.rs",
-        "rust/crates/runtime/src/mcp_client.rs",
-        "rust/crates/plugins/src/lib.rs"
-      ],
-      "output_path": "chapter-12/mcp.md",
+      "output_path": "chapter-12/coordinator.md",
       "status": "pending"
     },
     {
       "number": 13,
-      "title": "测试与质量保障：Mock Parity Harness 与行为验证",
+      "title": "测试与源码审计：Mock Parity 与兼容性追踪",
       "km_doc_id": "2754757683",
       "source_files": [
         "rust/crates/mock-anthropic-service/src/lib.rs",
@@ -170,50 +170,10 @@
     },
     {
       "number": 14,
-      "title": "TypeScript vs Python/Rust 三端对比",
-      "km_doc_id": "2755056487",
-      "source_files": [
-        "src/native_ts/",
-        "rust/crates/compat-harness/src/lib.rs",
-        "src/parity_audit.py"
-      ],
-      "output_path": "chapter-14/comparison.md",
-      "status": "pending"
-    },
-    {
-      "number": 15,
-      "title": "从 Java 工程师到 Agent 工程师的思维转型",
-      "km_doc_id": "2755153722",
-      "source_files": [],
-      "output_path": "chapter-15/mindset.md",
-      "status": "pending"
-    },
-    {
-      "number": 16,
-      "title": "配置层：Rules、Commands、MCP 与 Skills",
-      "km_doc_id": "2755143810",
-      "source_files": [
-        "rust/crates/runtime/src/config.rs",
-        "rust/crates/runtime/src/config_validate.rs",
-        "rust/crates/commands/src/lib.rs"
-      ],
-      "output_path": "chapter-16/config-layer.md",
-      "status": "pending"
-    },
-    {
-      "number": 17,
-      "title": "AI-Native 工程工作流",
-      "km_doc_id": "2754607508",
-      "source_files": [],
-      "output_path": "chapter-17/workflow.md",
-      "status": "pending"
-    },
-    {
-      "number": 18,
       "title": "总结与展望：从 claw-code 到 clawable",
       "km_doc_id": "",
       "source_files": [],
-      "output_path": "chapter-18/summary.md",
+      "output_path": "chapter-14/summary.md",
       "status": "pending"
     }
   ]

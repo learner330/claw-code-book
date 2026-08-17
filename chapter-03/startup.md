@@ -1,4 +1,4 @@
-# 第4章 启动流程深度解析：Bootstrap 七阶段与配置合并
+# 第3章 启动流程：从 CLI 到运行
 
 ## 本章概览
 
@@ -7,7 +7,7 @@
 
 启动流程要解决的核心问题是：如何把一组命令行参数、若干个 JSON 配置文件、一个 CLAUDE.md 指令文件，组装成一个可运行的 Agent 系统。这个过程分为多个阶段（Bootstrap Plan），每个阶段有明确的职责，前一阶段的输出是后一阶段的输入。
 
-本章按数据流顺序展开：先看 CLI 入口如何接收和分发命令（4.1），再看 Bootstrap 阶段如何编排初始化（4.2），然后深入配置加载的三层合并机制（4.3），最后看模型和权限的来源追踪（4.4）。
+本章按数据流顺序展开：先看端到端流程概述（3.1），再看 CLI 入口如何接收和分发命令（3.2），然后看 Bootstrap 阶段如何编排初始化（3.3），深入配置加载的三层合并机制（3.4），最后看模型和权限的来源追踪（3.5）。
 
 | 关键文件 | 职责 |
 | --- | --- |
@@ -15,7 +15,107 @@
 | `rust/crates/runtime/src/bootstrap.rs` | Bootstrap 阶段定义与编排 |
 | `rust/crates/runtime/src/config.rs` | 三层配置加载与合并 |
 
-## 4.1 CLI 入口与参数解析
+## 3.1 端到端流程概述
+
+本节追踪一次完整的命令执行路径：从用户在终端输入 `claw "帮我写一个快速排序"`，到第一条 LLM 响应流出，数据依次经过哪些模块、执行什么操作。
+
+本节不展开任何模块的内部实现——那是后续各节的任务。本节的作用是勾画路径，让读者建立"一条命令经过哪些地方"的整体印象。全节只包含 5 个代码片段，每个只展示关键路径上的入口点。
+
+### CLI 入口：命令被接收
+
+用户输入 `claw "帮我写一个快速排序"` 后，Rust 版的 `main()` 函数接收命令行参数。`main()` 只做错误包装，核心逻辑在 `run()` 中：
+
+```rust
+// claw-code/rust/crates/rusty-claude-cli/src/main.rs
+
+fn run() -> Result<(), Box<dyn std::error::Error>> {
+    let args: Vec<String> = env::args().skip(1).collect();
+    let json_mode = raw_args_request_json_output(&args);
+    if json_mode {
+        runtime::suppress_config_warnings_for_json_mode();
+    }
+    let (args, cwd) = split_global_cwd_args(&args)?;
+    apply_global_cwd(cwd)?;
+    match parse_args(&args)? {
+        CliAction::Prompt { prompt, model, .. } => {
+            // 进入交互模式，启动 Turn Loop
+        }
+        CliAction::Version { .. } => print_version(),
+        // ...其他分支
+    }
+}
+```
+
+`parse_args` 把参数解析为 `CliAction` 枚举。用户输入的 prompt 文本匹配到 `CliAction::Prompt` 变体，携带 prompt 内容、模型选择、权限模式等参数。枚举匹配是穷尽的，编译器保证所有分支都被处理。
+
+这条命令不会走 `Version` 或 `Status` 等快速退出路径，而是进入完整的 Bootstrap 流程。
+
+### Bootstrap 阶段：系统就绪
+
+Bootstrap 是从命令接收到 Turn Loop 启动之间的初始化过程。Rust 版在 `runtime/src/bootstrap.rs` 中定义了一组阶段：
+
+```rust
+// claw-code/rust/crates/runtime/src/bootstrap.rs
+
+pub enum BootstrapPhase {
+    CliEntry,
+    FastPathVersion,
+    StartupProfiler,
+    SystemPromptFastPath,
+    ChromeMcpFastPath,
+    DaemonWorkerFastPath,
+    BridgeFastPath,
+    DaemonFastPath,
+    BackgroundSessionFastPath,
+    TemplateFastPath,
+    EnvironmentRunnerFastPath,
+    MainRuntime,
+}
+```
+
+`BootstrapPlan` 按顺序编排这些阶段，默认计划包含全部 12 个阶段。`from_phases` 方法会去除重复阶段，保证同一阶段不会执行两次。这种设计允许不同启动场景自定义阶段序列，同时保证执行安全。
+
+### 配置加载：三层合并
+
+Bootstrap 过程中，`ConfigLoader` 加载三层配置文件并合并。三个层次从低到高：
+
+| 层级 | 文件路径 | 作用 |
+| --- | --- | --- |
+| User | `~/.claw/settings.json` | 用户全局配置 |
+| Project | `.claw/settings.json` | 项目共享配置 |
+| Local | `.claw/settings.local.json` | 个人本地覆盖（不提交 git） |
+
+`ConfigLoader::discover()` 返回按优先级排列的文件列表，`load()` 逐个读取并通过 `deep_merge_objects` 合并，后加载的覆盖先加载的。合并后的 `RuntimeConfig` 包含模型选择、权限模式、MCP 服务器配置、钩子配置等所有运行时参数。
+
+### 工具注册与权限初始化
+
+配置加载完成后，系统注册工具并初始化权限。
+
+工具注册由 `tools` crate 的 `mvp_tool_specs()` 完成，加载所有内置工具（文件读写、Bash 执行、代码搜索等）和 MCP 外部工具。每个工具注册时声明自己的名称、描述和参数 Schema，这些信息后续会发给 LLM，让 LLM 知道有哪些工具可用。
+
+权限初始化由 `PermissionEnforcer` 完成，根据配置中的 `PermissionMode` 设置操作边界。默认使用 `WorkspaceWrite` 模式，Agent 可以读写当前工作区目录中的文件，但不能修改系统文件。
+
+### Turn Loop 启动：第一条消息进入循环
+
+Bootstrap 的 `MainRuntime` 阶段启动 Turn Loop。`ConversationRuntime` 先被初始化，包含系统提示词（由 CLAUDE.md 和内置指令组成）和空的消息列表。然后用户的 prompt 被加入消息列表，开始第一轮循环。
+
+第一轮循环把完整的消息列表发给 LLM，LLM 返回响应。如果响应包含工具调用（比如"先读取项目结构"），Agent 执行工具后把结果加入消息列表，进入第二轮循环。如果响应不包含工具调用，循环结束，输出最终结果。
+
+```mermaid
+graph TD
+    A[用户输入: 帮我写一个快速排序] --> B[加入消息列表]
+    B --> C[第1轮: 发送消息给 LLM]
+    C --> D{LLM 响应包含工具调用?}
+    D -->|是| E[执行工具: 如读取文件]
+    E --> F[工具结果加入消息列表]
+    F --> C
+    D -->|否| G[输出最终结果: 排序代码]
+    G --> H[会话持久化]
+```
+
+从用户输入到第一条 LLM 响应流出，数据经过了 CLI 入口、Bootstrap 阶段、配置加载、工具注册、权限初始化、会话创建、Turn Loop 启动这七个环节。每个环节的具体实现在后续各节展开。
+
+## 3.2 CLI 入口与参数解析
 
 入口在 `rust/crates/rusty-claude-cli/src/main.rs` 中。`main()` 函数只做错误包装，核心逻辑在 `run()` 中：
 
@@ -90,7 +190,7 @@ cli.run_turn_with_output(&effective_prompt, output_format, compact)?;
 
 `LiveCli::new()` 内部依次完成：构建 system prompt、创建 session、调用 `build_runtime()` 组装运行时。这是 Bootstrap 的核心调用链。
 
-## 4.2 Bootstrap Plan：阶段编排
+## 3.3 Bootstrap Plan：阶段编排
 
 Rust 版在 `runtime/src/bootstrap.rs` 中定义了启动阶段。`BootstrapPhase` 枚举列出了所有可能的阶段：
 
@@ -176,7 +276,7 @@ graph TD
 
 `MainRuntime` 阶段是进入完整运行时的入口。在这个阶段，`build_runtime()` 被调用，它组装 `ConversationRuntime` 所需的所有组件：API 客户端、工具执行器、会话状态、权限策略。
 
-## 4.3 配置加载与三层合并
+## 3.4 配置加载与三层合并
 
 ### ConfigLoader 结构
 
@@ -320,7 +420,7 @@ fn emit_config_warning_once(warning: &str) {
 }
 ```
 
-`SUPPRESS_CONFIG_WARNINGS_STDERR` 就是 4.1 节中 `suppress_config_warnings_for_json_mode()` 设置的原子布尔值。当 JSON 模式开启时，警告直接丢弃。`guard.insert()` 返回 `true` 表示集合中之前没有这个警告（首次出现），输出到 stderr；返回 `false` 表示重复警告，跳过。
+`SUPPRESS_CONFIG_WARNINGS_STDERR` 就是 3.2 节中 `suppress_config_warnings_for_json_mode()` 设置的原子布尔值。当 JSON 模式开启时，警告直接丢弃。`guard.insert()` 返回 `true` 表示集合中之前没有这个警告（首次出现），输出到 stderr；返回 `false` 表示重复警告，跳过。
 
 第四，MCP 服务器合并（`merge_mcp_servers`）。MCP 配置不是简单的键值对，而是嵌套的服务器定义，需要专门的合并逻辑。
 
@@ -399,7 +499,7 @@ impl Default for ApiTimeoutConfig {
 
 请求超时设为 5 分钟是因为 LLM 推理可能很慢——复杂 prompt 的首 token 延迟可能超过 60 秒，完整响应可能需要数分钟。如果超时太短，长任务会被误杀。重试 8 次是为了应对 API 的瞬态错误（429 限流、503 服务不可用），每次重试之间有指数退避。
 
-## 4.4 模型与权限的来源追踪
+## 3.5 模型与权限的来源追踪
 
 ### ModelProvenance：四级溯源
 
@@ -540,9 +640,9 @@ claw-code 的启动流程从 CLI 入口到 Turn Loop 分为多个阶段。CLI �
 
 | 关键文件 | 核心机制 | 对应章节 |
 | --- | --- | --- |
-| `rusty-claude-cli/src/main.rs` | `CliAction` 枚举，`run()` 分发，`LiveCli::new()` | 本章 4.1 |
-| `runtime/src/bootstrap.rs` | `BootstrapPhase`，`BootstrapPlan` | 本章 4.2 |
-| `runtime/src/config.rs` | `ConfigLoader`，三层合并，`ConfigFileReport` | 本章 4.3 |
-| `rusty-claude-cli/src/main.rs` | `ModelProvenance`，`PermissionModeProvenance` | 本章 4.4 |
+| `rusty-claude-cli/src/main.rs` | `CliAction` 枚举，`run()` 分发，`LiveCli::new()` | 本章 3.2 |
+| `runtime/src/bootstrap.rs` | `BootstrapPhase`，`BootstrapPlan` | 本章 3.3 |
+| `runtime/src/config.rs` | `ConfigLoader`，三层合并，`ConfigFileReport` | 本章 3.4 |
+| `rusty-claude-cli/src/main.rs` | `ModelProvenance`，`PermissionModeProvenance` | 本章 3.5 |
 
 下一章将分析 API 通信与模型交互——claw-code 如何与 LLM 建立 SSE 流式连接，以及如何实现多 provider 路由。

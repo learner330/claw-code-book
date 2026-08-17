@@ -1,4 +1,4 @@
-# 第16章 配置层：Rules、Commands、MCP 与 Skills
+# 第4章 配置系统：Rules、Commands、MCP 与 Skills
 
 ## 本章概览
 
@@ -397,7 +397,7 @@ Skills 系统与插件系统（第12章）的关系：skills 是"轻量级命令
 
 ## 16.5 Commands 架构：解析与分发
 
-第16章当前版本列出了 30 多个 slash 命令的元数据（`SlashCommandSpec`），但这只是静态声明。Commands 架构的核心是解析和分发——如何把用户输入的 `/command args` 转换为运行时可执行的操作。
+第4章当前版本列出了 30 多个 slash 命令的元数据（`SlashCommandSpec`），但这只是静态声明。Commands 架构的核心是解析和分发——如何把用户输入的 `/command args` 转换为运行时可执行的操作。
 
 ### 解析层
 

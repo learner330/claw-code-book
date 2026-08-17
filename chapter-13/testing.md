@@ -286,18 +286,123 @@ impl HarnessWorkspace {
 
 每个场景的请求计数被记录到 `scenario_reports` 中。如果新增功能改变了请求计数（如添加 `count_tokens` 预检），测试会失败，提醒开发者更新预期。注释中提到 `be561bf` 提交增加了 `count_tokens` 预检，导致总请求数从 21 变为更多，测试被更新为只过滤 `/v1/messages` 路径。
 
-## 13.3 CompatHarness：源码级兼容性审计
+## 13.3 设计目标：为什么需要 compat-harness
 
-`compat-harness` crate 从原始 upstream 的 TypeScript 源码中提取命令、工具和启动计划清单，用于审计 Rust 实现是否覆盖了所有功能：
+claw-code 是对 upstream TypeScript 参考实现的重写。重写的风险是遗漏功能——upstream 有某个命令或工具，Rust 实现中没有对应物。手工对比容易遗漏，因为 upstream 的代码量大且持续演进。
+
+`compat-harness` 的解决方案是自动提取 upstream 源码中的符号清单：
+
+- **命令**：从 `src/commands.ts` 提取所有导入的命令符号
+- **工具**：从 `src/tools.ts` 提取所有导入的工具符号
+- **启动阶段**：从 `src/entrypoints/cli.tsx` 提取快速路径分支
+
+提取后的清单与 Rust 端的 `CommandRegistry` 和 `ToolRegistry` 对比，生成覆盖率报告。这种审计不是行为测试（验证功能是否正确），而是存在性测试（验证功能是否存在）。
+
+## 13.4 路径解析：UpstreamPaths 的搜索策略
+
+`UpstreamPaths` 负责定位 upstream 仓库。搜索策略不是简单的相对路径，而是多候选者优先级搜索：
 
 ```rust
 // claw-code/rust/crates/compat-harness/src/lib.rs
 
-pub struct ExtractedManifest {
-    pub commands: CommandRegistry,
-    pub tools: ToolRegistry,
-    pub bootstrap: BootstrapPlan,
+pub struct UpstreamPaths {
+    repo_root: PathBuf,
 }
+
+impl UpstreamPaths {
+    pub fn from_workspace_dir(workspace_dir: impl AsRef<Path>) -> Self {
+        let workspace_dir = workspace_dir
+            .as_ref()
+            .canonicalize()
+            .unwrap_or_else(|_| workspace_dir.as_ref().to_path_buf());
+        let primary_repo_root = workspace_dir
+            .parent()
+            .map_or_else(|| PathBuf::from(".."), Path::to_path_buf);
+        let repo_root = resolve_upstream_repo_root(&primary_repo_root);
+        Self { repo_root }
+    }
+}
+```
+
+`from_workspace_dir` 接收 Rust workspace 目录（`rust/`），先 canonicalize 消除符号链接，再取父目录作为 primary 候选。`resolve_upstream_repo_root` 在多个候选中搜索包含 `src/commands.ts` 的目录：
+
+```rust
+// claw-code/rust/crates/compat-harness/src/lib.rs
+
+fn resolve_upstream_repo_root(primary_repo_root: &Path) -> PathBuf {
+    let candidates = upstream_repo_candidates(primary_repo_root);
+    candidates
+        .into_iter()
+        .find(|candidate| candidate.join("src/commands.ts").is_file())
+        .unwrap_or_else(|| primary_repo_root.to_path_buf())
+}
+```
+
+候选者生成逻辑：
+
+```rust
+// claw-code/rust/crates/compat-harness/src/lib.rs
+
+fn upstream_repo_candidates(primary_repo_root: &Path) -> Vec<PathBuf> {
+    let mut candidates = vec![primary_repo_root.to_path_buf()];
+
+    // 环境变量覆盖
+    if let Some(explicit) = std::env::var_os("CLAUDE_CODE_UPSTREAM") {
+        candidates.push(PathBuf::from(explicit));
+    }
+
+    // 向上搜索 4 层祖先目录，尝试 claw-code 和 clawd-code 子目录
+    for ancestor in primary_repo_root.ancestors().take(4) {
+        candidates.push(ancestor.join("claw-code"));
+        candidates.push(ancestor.join("clawd-code"));
+    }
+
+    // 固定路径候选
+    candidates.push(primary_repo_root.join("reference-source").join("claw-code"));
+    candidates.push(primary_repo_root.join("vendor").join("claw-code"));
+
+    // 去重（保持顺序）
+    let mut deduped = Vec::new();
+    for candidate in candidates {
+        if !deduped.iter().any(|seen: &PathBuf| seen == &candidate) {
+            deduped.push(candidate);
+        }
+    }
+    deduped
+}
+```
+
+搜索策略的优先级：
+
+1. `primary_repo_root`（workspace 的父目录）
+2. `CLAUDE_CODE_UPSTREAM` 环境变量（显式覆盖）
+3. 向上 4 层祖先目录中的 `claw-code/` 或 `clawd-code/` 子目录
+4. `reference-source/claw-code/` 和 `vendor/claw-code/` 固定路径
+
+去重使用线性搜索 `any(|seen| seen == &candidate)`，候选数量通常小于 20，性能可忽略。去重保持插入顺序，高优先级候选先被检查。
+
+`UpstreamPaths` 提供三个固定路径：
+
+```rust
+// claw-code/rust/crates/compat-harness/src/lib.rs
+
+impl UpstreamPaths {
+    pub fn commands_path(&self) -> PathBuf {
+        self.repo_root.join("src/commands.ts")
+    }
+    pub fn tools_path(&self) -> PathBuf {
+        self.repo_root.join("src/tools.ts")
+    }
+    pub fn cli_path(&self) -> PathBuf {
+        self.repo_root.join("src/entrypoints/cli.tsx")
+    }
+}
+```
+
+`extract_manifest` 读取这三个文件并调用对应的提取函数：
+
+```rust
+// claw-code/rust/crates/compat-harness/src/lib.rs
 
 pub fn extract_manifest(paths: &UpstreamPaths) -> std::io::Result<ExtractedManifest> {
     let commands_source = fs::read_to_string(paths.commands_path())?;
@@ -312,9 +417,9 @@ pub fn extract_manifest(paths: &UpstreamPaths) -> std::io::Result<ExtractedManif
 }
 ```
 
-`extract_manifest` 读取三个 TypeScript 文件：`src/commands.ts`（命令定义）、`src/tools.ts`（工具定义）、`src/entrypoints/cli.tsx`（CLI 入口）。通过静态分析提取符号清单。
+## 13.5 命令提取：三种来源的符号解析
 
-### 命令提取
+`extract_commands` 从 `commands.ts` 提取命令符号。upstream 的命令有三种来源：内置（`import` 导入）、内部专用（`INTERNAL_ONLY_COMMANDS` 数组）、功能开关（`feature()` 动态加载）。
 
 ```rust
 // claw-code/rust/crates/compat-harness/src/lib.rs
@@ -326,31 +431,42 @@ pub fn extract_commands(source: &str) -> CommandRegistry {
     for raw_line in source.lines() {
         let line = raw_line.trim();
 
+        // 检测 INTERNAL_ONLY_COMMANDS 数组块
         if line.starts_with("export const INTERNAL_ONLY_COMMANDS = [") {
             in_internal_block = true;
             continue;
         }
-
         if in_internal_block {
             if line.starts_with(']') {
                 in_internal_block = false;
                 continue;
             }
             if let Some(name) = first_identifier(line) {
-                entries.push(CommandManifestEntry { name, source: CommandSource::InternalOnly });
+                entries.push(CommandManifestEntry {
+                    name,
+                    source: CommandSource::InternalOnly,
+                });
             }
             continue;
         }
 
+        // 检测 import 语句中的内置命令
         if line.starts_with("import ") {
             for imported in imported_symbols(line) {
-                entries.push(CommandManifestEntry { name: imported, source: CommandSource::Builtin });
+                entries.push(CommandManifestEntry {
+                    name: imported,
+                    source: CommandSource::Builtin,
+                });
             }
         }
 
+        // 检测 feature-gated 命令
         if line.contains("feature('") && line.contains("./commands/") {
             if let Some(name) = first_assignment_identifier(line) {
-                entries.push(CommandManifestEntry { name, source: CommandSource::FeatureGated });
+                entries.push(CommandManifestEntry {
+                    name,
+                    source: CommandSource::FeatureGated,
+                });
             }
         }
     }
@@ -359,9 +475,106 @@ pub fn extract_commands(source: &str) -> CommandRegistry {
 }
 ```
 
-`extract_commands` 通过简单的文本模式匹配提取命令符号。`INTERNAL_ONLY_COMMANDS` 块标记内部命令。`import` 语句提取导入的符号。`feature('...')` 和 `./commands/` 模式标记 feature-gated 命令。`first_identifier` 从行首提取第一个标识符（字母、数字、下划线、连字符）。`dedupe_commands` 去重。
+解析逻辑是逐行扫描，状态机跟踪是否在 `INTERNAL_ONLY_COMMANDS` 数组块内。`first_identifier` 提取行中的第一个标识符（字母数字下划线连字符）：
 
-### 工具提取
+```rust
+// claw-code/rust/crates/compat-harness/src/lib.rs
+
+fn first_identifier(line: &str) -> Option<String> {
+    let mut out = String::new();
+    for ch in line.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' {
+            out.push(ch);
+        } else if !out.is_empty() {
+            break;
+        }
+    }
+    (!out.is_empty()).then_some(out)
+}
+```
+
+`first_assignment_identifier` 提取赋值左侧的标识符：
+
+```rust
+// claw-code/rust/crates/compat-harness/src/lib.rs
+
+fn first_assignment_identifier(line: &str) -> Option<String> {
+    let trimmed = line.trim_start();
+    let candidate = trimmed.split('=').next()?.trim();
+    first_identifier(candidate)
+}
+```
+
+`imported_symbols` 解析 TypeScript 的 import 语句，支持 named import 和 default import：
+
+```rust
+// claw-code/rust/crates/compat-harness/src/lib.rs
+
+fn imported_symbols(line: &str) -> Vec<String> {
+    let Some(after_import) = line.strip_prefix("import ") else {
+        return Vec::new();
+    };
+
+    let before_from = after_import
+        .split(" from ")
+        .next()
+        .unwrap_or_default()
+        .trim();
+
+    if before_from.starts_with('{') {
+        // named import: import { A, B } from '...'
+        return before_from
+            .trim_matches(|c| c == '{' || c == '}')
+            .split(',')
+            .filter_map(|part| {
+                let trimmed = part.trim();
+                if trimmed.is_empty() {
+                    return None;
+                }
+                // 处理 "A as B"，取第一个词
+                Some(trimmed.split_whitespace().next()?.to_string())
+            })
+            .collect();
+    }
+
+    // default import: import X from '...' 或 import X, { Y } from '...'
+    let first = before_from.split(',').next().unwrap_or_default().trim();
+    if first.is_empty() {
+        Vec::new()
+    } else {
+        vec![first.to_string()]
+    }
+}
+```
+
+这个解析器不是完整的 TypeScript 解析器，而是基于字符串匹配的启发式提取。它的假设是 upstream 的 import 语句遵循简单格式（没有复杂的解构或换行）。这个假设在实践中成立，因为 `commands.ts` 的导入通常是规范化的。
+
+`feature-gated` 命令的检测条件 `line.contains("feature('") && line.contains("./commands/")` 确保只捕获通过 `feature()` 函数动态加载的命令，而不是其他 feature 调用。`first_assignment_identifier` 提取赋值左侧的变量名——如 `const reviewCommand = feature('review', () => import('./commands/review'))` 中提取 `reviewCommand`。
+
+去重逻辑比较名称和来源：
+
+```rust
+// claw-code/rust/crates/compat-harness/src/lib.rs
+
+fn dedupe_commands(entries: Vec<CommandManifestEntry>) -> CommandRegistry {
+    let mut deduped = Vec::new();
+    for entry in entries {
+        let exists = deduped.iter().any(|seen: &CommandManifestEntry| {
+            seen.name == entry.name && seen.source == entry.source
+        });
+        if !exists {
+            deduped.push(entry);
+        }
+    }
+    CommandRegistry::new(deduped)
+}
+```
+
+注意去重条件是 `name == entry.name && source == entry.source`——同名但不同来源的命令会被保留（如一个命令既是内置又是 feature-gated）。
+
+## 13.6 工具提取：符号过滤与命名约定
+
+`extract_tools` 与 `extract_commands` 结构相似，但增加了命名过滤：
 
 ```rust
 // claw-code/rust/crates/compat-harness/src/lib.rs
@@ -374,7 +587,10 @@ pub fn extract_tools(source: &str) -> ToolRegistry {
         if line.starts_with("import ") && line.contains("./tools/") {
             for imported in imported_symbols(line) {
                 if imported.ends_with("Tool") {
-                    entries.push(ToolManifestEntry { name: imported, source: ToolSource::Base });
+                    entries.push(ToolManifestEntry {
+                        name: imported,
+                        source: ToolSource::Base,
+                    });
                 }
             }
         }
@@ -382,7 +598,10 @@ pub fn extract_tools(source: &str) -> ToolRegistry {
         if line.contains("feature('") && line.contains("Tool") {
             if let Some(name) = first_assignment_identifier(line) {
                 if name.ends_with("Tool") || name.ends_with("Tools") {
-                    entries.push(ToolManifestEntry { name, source: ToolSource::Conditional });
+                    entries.push(ToolManifestEntry {
+                        name,
+                        source: ToolSource::Conditional,
+                    });
                 }
             }
         }
@@ -392,9 +611,13 @@ pub fn extract_tools(source: &str) -> ToolRegistry {
 }
 ```
 
-工具提取与命令类似，但过滤 `ends_with("Tool")` 或 `ends_with("Tools")` 的符号。`Base` 来源表示基础工具，`Conditional` 表示 feature-gated 条件工具。
+工具提取有两个过滤条件：`imported.ends_with("Tool")` 和 `name.ends_with("Tool") || name.ends_with("Tools")`。upstream 的工具命名遵循 `XxxTool` 的约定，这个过滤排除了非工具类的导入（如工具共享的辅助函数）。
 
-### 启动计划提取
+工具来源分为 `Base`（基础工具，始终可用）和 `Conditional`（条件工具，通过 feature flag 启用）。这与命令的 `Builtin` / `FeatureGated` 对应，但使用不同名称因为工具系统的语义略有不同。
+
+## 13.7 启动阶段提取：字符串匹配的极限
+
+`extract_bootstrap_plan` 是最特殊的提取函数——它不解析 AST，而是通过子字符串匹配检测 upstream CLI 入口中的快速路径分支：
 
 ```rust
 // claw-code/rust/crates/compat-harness/src/lib.rs
@@ -423,7 +646,7 @@ pub fn extract_bootstrap_plan(source: &str) -> BootstrapPlan {
     if source.contains("args[0] === 'daemon'") {
         phases.push(BootstrapPhase::DaemonFastPath);
     }
-    if source.contains("args[0] === 'ps' || args.includes('--bg')") {
+    if source.contains("args[0] === 'ps'") || source.contains("args.includes('--bg')") {
         phases.push(BootstrapPhase::BackgroundSessionFastPath);
     }
     if source.contains("args[0] === 'new' || args[0] === 'list' || args[0] === 'reply'") {
@@ -438,61 +661,87 @@ pub fn extract_bootstrap_plan(source: &str) -> BootstrapPlan {
 }
 ```
 
-启动计划提取通过字符串包含检查检测 CLI 源码中的快速路径分支。每个 `contains` 检查对应一个特定的 CLI 参数或功能。`BootstrapPlan::from_phases` 构建启动计划。这种方法是粗略的——它只能检测代码中存在某个字符串，不能验证实现是否正确，但足以作为覆盖率检查清单。
+这段代码的本质是：如果 upstream 源码中包含某个字符串，就推断存在对应的快速路径。例如 `source.contains("--version")` 意味着 upstream 支持 `--version` 快速路径（打印版本后直接退出，不加载完整运行时）。
 
-### 路径解析
+这种检测方式的局限性很明显：
 
-`UpstreamPaths` 解析 upstream 仓库位置：
+1. **假阳性**：如果源码中包含 `"--version"` 但不是作为 CLI 参数处理（如在注释或字符串字面量中），会误判
+2. **假阴性**：如果 upstream 修改了参数名（如 `--ver` 代替 `--version`），检测会失效
+3. **无法检测顺序**：快速路径的评估顺序（哪个先检查）无法从子字符串匹配中推断
+
+但这些局限性是可接受的，因为 `compat-harness` 的目标是"功能存在性审计"而非"行为正确性验证"。`BootstrapPlan::from_phases` 会自动去重和排序，确保构建的计划是有效的。
+
+## 13.8 Registry 结构的跨模块复用
+
+`compat-harness` 的一个设计亮点是复用 Rust 端的 Registry 结构。`CommandRegistry` 和 `ToolRegistry` 定义在 `commands` 和 `tools` crate 中，`compat-harness` 直接复用：
 
 ```rust
 // claw-code/rust/crates/compat-harness/src/lib.rs
 
-pub struct UpstreamPaths {
-    repo_root: PathBuf,
-}
+use commands::{CommandManifestEntry, CommandRegistry, CommandSource};
+use runtime::{BootstrapPhase, BootstrapPlan};
+use tools::{ToolManifestEntry, ToolRegistry, ToolSource};
+```
 
-impl UpstreamPaths {
-    pub fn from_workspace_dir(workspace_dir: impl AsRef<Path>) -> Self {
-        let workspace_dir = workspace_dir.as_ref().canonicalize().unwrap_or_else(|_| workspace_dir.as_ref().to_path_buf());
-        let primary_repo_root = workspace_dir.parent().map_or_else(|| PathBuf::from(".."), Path::to_path_buf);
-        let repo_root = resolve_upstream_repo_root(&primary_repo_root);
-        Self { repo_root }
-    }
-}
+`ExtractedManifest` 使用这些复用类型：
 
-fn resolve_upstream_repo_root(primary_repo_root: &Path) -> PathBuf {
-    let candidates = upstream_repo_candidates(primary_repo_root);
-    candidates.into_iter().find(|candidate| candidate.join("src/commands.ts").is_file()).unwrap_or_else(|| primary_repo_root.to_path_buf())
-}
+```rust
+// claw-code/rust/crates/compat-harness/src/lib.rs
 
-fn upstream_repo_candidates(primary_repo_root: &Path) -> Vec<PathBuf> {
-    let mut candidates = vec![primary_repo_root.to_path_buf()];
-
-    if let Some(explicit) = std::env::var_os("CLAUDE_CODE_UPSTREAM") {
-        candidates.push(PathBuf::from(explicit));
-    }
-
-    for ancestor in primary_repo_root.ancestors().take(4) {
-        candidates.push(ancestor.join("claw-code"));
-        candidates.push(ancestor.join("clawd-code"));
-    }
-
-    candidates.push(primary_repo_root.join("reference-source").join("claw-code"));
-    candidates.push(primary_repo_root.join("vendor").join("claw-code"));
-
-    let mut deduped = Vec::new();
-    for candidate in candidates {
-        if !deduped.iter().any(|seen: &PathBuf| seen == &candidate) {
-            deduped.push(candidate);
-        }
-    }
-    deduped
+pub struct ExtractedManifest {
+    pub commands: CommandRegistry,
+    pub tools: ToolRegistry,
+    pub bootstrap: BootstrapPlan,
 }
 ```
 
+这种复用的好处是：当 Rust 端的命令或工具注册表结构变化时，`compat-harness` 的对比逻辑自动适配。不需要维护两套平行的注册表结构。Rust 的类型系统确保 `compat-harness` 提取的清单与运行时使用的注册表结构兼容。
+
+测试用例验证提取的准确性：
+
+```rust
+// claw-code/rust/crates/compat-harness/src/lib.rs
+
+#[test]
+fn detects_known_upstream_command_symbols() {
+    let paths = fixture_paths();
+    if !paths.commands_path().is_file() {
+        return; // 跳过：没有 upstream fixture
+    }
+    let commands = extract_commands(&fs::read_to_string(paths.commands_path()).expect("commands.ts"));
+    let names: Vec<_> = commands.entries().iter().map(|e| e.name.as_str()).collect();
+    assert!(names.contains(&"addDir"));
+    assert!(names.contains(&"review"));
+    assert!(!names.contains(&"INTERNAL_ONLY_COMMANDS")); // 数组名不应被当作命令
+}
+```
+
+测试使用条件跳过——如果没有 upstream fixture（`commands.ts` 不存在），测试静默通过。这允许 `compat-harness` 在没有 upstream 源码的环境中编译和运行。
+
+## 13.9 审计输出的使用
+
+`compat-harness` 的输出是结构化的 `ExtractedManifest`，包含三个清单。对比流程（在 CI 脚本或人工审查中）通常是：
+
+1. 运行 `extract_manifest` 提取 upstream 清单
+2. 读取 Rust 端的 `SLASH_COMMAND_SPECS`（第4章）和 `mvp_tool_specs`（第6章）
+3. 对比名称集合，找出 upstream 有但 Rust 端缺少的符号
+4. 对缺失符号进行分类：有意省略（社区扩展内容）、尚未实现（需要跟进）、未知遗漏（需要调查）
+
+这种审计的价值在于**预防渐进式遗漏**。Rust 重写是增量进行的，每次新增功能后运行审计，可以确认没有因为聚焦某个模块而忘记其他模块的对应功能。
+
+
+`compat-harness` 是一个轻量级的源码审计工具，用基于字符串匹配的启发式方法从 TypeScript 源码中提取符号清单。`UpstreamPaths` 实现多候选者优先级搜索（环境变量、祖先目录、固定路径）。`extract_commands` 通过状态机跟踪三种命令来源（内置 import、内部专用数组、feature-gated 动态加载）。`extract_tools` 增加 `ends_with("Tool")` 命名过滤。`extract_bootstrap_plan` 使用子字符串匹配检测快速路径分支——有假阳性和假阴性风险，但对"功能存在性审计"足够有效。
+
+Registry 结构（`CommandRegistry`、`ToolRegistry`、`BootstrapPlan`）的跨模块复用是设计亮点，Rust 类型系统保证提取清单与运行时结构的兼容性。条件跳过的测试用例允许在无 upstream 环境中编译。
+
+| 提取函数 | 输入文件 | 检测方式 | 来源分类 |
+| --- | --- | --- | --- |
+| `extract_commands` | `src/commands.ts` | import 语句 + INTERNAL_ONLY 数组块 + feature() 调用 | Builtin / InternalOnly / FeatureGated |
+| `extract_tools` | `src/tools.ts` | import 语句（过滤 `*Tool`）+ feature() 调用（过滤 `*Tool`） | Base / Conditional |
+| `extract_bootstrap_plan` | `src/entrypoints/cli.tsx` | 子字符串匹配（`--version`、`args[0] === 'daemon'` 等） | 快速路径阶段枚举 |
 `upstream_repo_candidates` 生成多个候选路径：直接父目录、`CLAUDE_CODE_UPSTREAM` 环境变量、祖先目录下的 `claw-code`/`clawd-code`、`reference-source`/`vendor` 子目录。`resolve_upstream_repo_root` 找到第一个包含 `src/commands.ts` 的候选。这种设计允许 upstream 源码放在多个位置，测试自动适配。
 
-## 13.4 测试脚本与 CI 集成
+## 13.10 测试脚本与 CI 集成
 
 `run_mock_parity_harness.sh` 是测试入口：
 
@@ -511,7 +760,7 @@ cargo test -p rusty-claude-cli --test mock_parity_harness -- --nocapture
 
 这个脚本可以被 CI 调用——每次提交时自动运行 12 个端到端场景，验证核心功能路径的行为一致性。
 
-## 13.5 测试设计原则
+## 13.11 测试设计原则
 
 Mock Parity Harness 的设计体现了几条测试原则：
 
@@ -535,7 +784,7 @@ Mock Parity Harness 的设计体现了几条测试原则：
 | --- | --- | --- |
 | `rust/crates/mock-anthropic-service/src/lib.rs` | `MockAnthropicService`、TCP 监听、场景检测、请求捕获 | 13.1 |
 | `rust/crates/rusty-claude-cli/tests/mock_parity_harness.rs` | 12 场景端到端测试、`HarnessWorkspace`、请求序列验证 | 13.2 |
-| `rust/crates/compat-harness/src/lib.rs` | `extract_manifest`、源码静态分析、路径解析 | 13.3 |
-| `rust/scripts/run_mock_parity_harness.sh` | CI 集成脚本 | 13.4 |
+| `rust/crates/compat-harness/src/lib.rs` | `extract_manifest`、源码静态分析、路径解析 | 13.3-13.9 |
+| `rust/scripts/run_mock_parity_harness.sh` | CI 集成脚本 | 13.10 |
 
-下一章将分析 TypeScript、Python 和 Rust 三端的实现对比——相同功能在不同技术栈中的架构差异和设计权衡。
+下一章将总结全书核心架构并展望 claw-code 生态演进。
