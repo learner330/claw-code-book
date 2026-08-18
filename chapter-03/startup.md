@@ -640,57 +640,52 @@ CLI 入口 `main.rs` 接收用户输入后，需要将文本命令解析为结�
 
 ### 斜杠命令解析
 
-`SlashCommand` 枚举在类型层面保证参数合法性：
+斜杠命令不是用枚举在编译期枚举所有变体，而是用 `SlashCommandSpec` 结构体加一张数据驱动的静态表 `SLASH_COMMAND_SPECS` 来声明：
 
 ```rust
 // claw-code/rust/crates/commands/src/lib.rs
 
-pub enum SlashCommand {
-    Help,
-    Status,
-    Sandbox,
-    Compact,
-    Model { model: Option<String> },
-    Permissions { mode: Option<PermissionMode> },
-    Clear { confirm: bool },
-    Cost,
-    Resume { session_path: Option<String> },
-    Config { section: Option<ConfigSection> },
-    Mcp { subcommand: Option<McpSubcommand> },
-    Memory,
-    Init,
-    Diff,
-    Version,
-    Bughunter { scope: Option<String> },
-    Commit,
-    Pr { context: Option<String> },
-    Issue { context: Option<String> },
-    Ultraplan { task: Option<String> },
-    Teleport { target: Option<String> },
-    DebugToolCall,
-    Export { path: Option<String> },
-    Session { subcommand: SessionSubcommand },
-    Plugin { subcommand: PluginSubcommand },
-    Agents { args: Option<String> },
-    Skills { args: Option<String> },
-    Doctor,
-    // ... 更多变体
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SlashCommandSpec {
+    pub name: &'static str,
+    pub aliases: &'static [&'static str],
+    pub summary: &'static str,
+    pub argument_hint: Option<&'static str>,
+    pub resume_supported: bool,
 }
+
+const SLASH_COMMAND_SPECS: &[SlashCommandSpec] = &[
+    SlashCommandSpec {
+        name: "help",
+        aliases: &[],
+        summary: "Show available slash commands",
+        argument_hint: None,
+        resume_supported: true,
+    },
+    SlashCommandSpec {
+        name: "model",
+        aliases: &[],
+        summary: "Show or switch the active model",
+        argument_hint: Some("[model]"),
+        resume_supported: false,
+    },
+    // ... 其余内置命令（status、permissions、session、plugin 等）
+];
 ```
 
-每个变体携带已解析的参数。`Model { model: Option<String> }` 中的 `Option` 表示参数可选——`/model` 不带参数时查询当前模型，`/model sonnet` 时切换模型。解析失败时提前返回错误，不会传递到执行阶段。
+每个命令都是表里的一条数据记录：`name` 是小写字符串命令名（如 `"model"`），`summary` 是帮助信息里的一句话描述，`argument_hint` 是可选的参数提示（如 `Some("[model]")`），`resume_supported` 表示该命令在会话恢复时是否可用，`aliases` 支持别名。
 
-解析函数是命令名到变体的映射，`optional_single_arg` 解析零个或一个参数，`parse_permissions_mode` 把字符串映射到 `PermissionMode` 枚举，子命令（`session`、`plugin`）有独立的解析函数处理更复杂的参数结构。
+参数合法性不是靠枚举变体在编译期保证，而是靠 `argument_hint` 这类元数据加解析函数在运行时校验。例如 `/model` 不带参数时查询当前模型、`/model sonnet` 时切换模型，这个行为由解析函数根据输入字符串判断，而不是由类型编码。解析时按 `name` 字段在静态表里查找匹配命令，`optional_single_arg` 解析零个或一个参数，`parse_permissions_mode` 把字符串映射到 `PermissionMode` 枚举，子命令（`session`、`plugin`）有独立的解析函数处理更复杂的参数结构。
 
 ### 分发层的设计
 
-解析后的 `SlashCommand` 被分发到运行时操作。分发逻辑不在 `commands` crate 中——`commands` crate 只负责解析，`rusty-claude-cli` 或 `runtime` 负责执行。这种设计保持 `commands` crate 的纯粹性（无运行时依赖），让解析逻辑可以被独立测试。
+解析后的命令被分发到运行时操作。分发逻辑不在 `commands` crate 中——`commands` crate 只负责解析，`rusty-claude-cli` 或 `runtime` 负责执行。这种设计保持 `commands` crate 的纯粹性（无运行时依赖），让解析逻辑可以被独立测试。
 
 部分命令修改运行时状态但不修改配置文件：`/permissions workspace-write` 只修改当前会话的 `active_mode`，不写入 `settings.json`。`/model sonnet` 同理。`config` 命令（`/config inspect`）则只读配置，不修改状态。这种"配置持久化、运行时状态临时化"的设计原则与 Bootstrap 流程中的来源追踪一致——命令系统只操作最顶层的运行时状态。
 
 ### Skills 发现与调用
 
-Skills 是可组合的命令能力单元，与插件（第7章）不同——skills 不通过 `plugin.json` 和生命周期钩子定义，而是通过目录结构和 Markdown frontmatter 定义，更轻量、更易于分发。
+Skills 是可组合的命令能力单元，与插件（第8章）不同——skills 不通过 `plugin.json` 和生命周期钩子定义，而是通过目录结构和 Markdown frontmatter 定义，更轻量、更易于分发。
 
 `SkillCollection` 遍历技能根目录，读取每个子目录中的 Markdown 文件 frontmatter（`name`、`description` 等字段），构建 `SkillSummary` 列表。`shadowed_by` 记录同名覆盖关系，`origin` 区分来源（标准技能目录或遗留命令目录），`metadata_drift` 收集 frontmatter 名称与目录名不一致的条目。
 
@@ -713,7 +708,7 @@ Skills 系统与插件系统的关系：skills 是"轻量级命令能力"，插�
 
 claw-code 的启动流程从 CLI 入口到 Turn Loop 分为多个阶段。CLI 入口 `main.rs` 用 `CliAction` 枚举和穷尽 `match` 匹配分发命令，编译时保证所有分支被处理。Bootstrap 由 `BootstrapPlan` 按阶段编排，默认包含 12 个阶段，从 `CliEntry` 到 `MainRuntime`，`from_phases` 方法自动去重保证安全。配置加载由 `ConfigLoader` 的 `discover()` 发现五个配置文件（三个层级，每层新旧两种格式），`load()` 逐个读取并通过 `deep_merge_objects` 递归合并，同时进行 schema 验证和 MCP 服务器合并，`ConfigFileReport` 记录每个键的覆盖关系。模型和权限的来源通过四级溯源（Flag → Env → Config → Default）记录，`claw status` 命令可展示完整来源链。
 
-CLI 交互层中，`SlashCommand` 枚举在类型层面保证参数合法性，解析失败时提前返回错误；`commands` crate 保持无运行时依赖的纯粹性，解析结果由 `rusty-claude-cli` 或 `runtime` 执行。Skills 是可组合的轻量级命令能力，通过目录结构和 Markdown frontmatter 定义，`SkillSlashDispatch` 支持本地执行和外部调用两种模式。
+CLI 交互层中，`SlashCommandSpec` 结构体加 `SLASH_COMMAND_SPECS` 静态表声明所有内置命令，解析时按 `name` 匹配，解析失败时提前返回错误；`commands` crate 保持无运行时依赖的纯粹性，解析结果由 `rusty-claude-cli` 或 `runtime` 执行。Skills 是可组合的轻量级命令能力，通过目录结构和 Markdown frontmatter 定义，`SkillSlashDispatch` 支持本地执行和外部调用两种模式。
 
 | 关键文件 | 核心机制 | 对应章节 |
 | --- | --- | --- |
@@ -721,6 +716,6 @@ CLI 交互层中，`SlashCommand` 枚举在类型层面保证参数合法性，�
 | `runtime/src/bootstrap.rs` | `BootstrapPhase`，`BootstrapPlan` | 本章 3.3 |
 | `runtime/src/config.rs` | `ConfigLoader`，三层合并，`ConfigFileReport` | 本章 3.4 |
 | `rusty-claude-cli/src/main.rs` | `ModelProvenance`，`PermissionModeProvenance` | 本章 3.5 |
-| `commands/src/lib.rs` | `SlashCommand` 枚举、参数解析、Skills 发现与分发 | 本章 3.6 |
+| `commands/src/lib.rs` | `SlashCommandSpec` 结构体 + 静态表、参数解析、Skills 发现与分发 | 本章 3.6 |
 
 下一章将分析配置系统——`ConfigLoader` 如何发现三层配置文件、`deep_merge_objects` 如何递归合并、以及合并后的配置如何成为各子系统的运行时契约。

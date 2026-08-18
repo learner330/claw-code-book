@@ -1,4 +1,4 @@
-# 第11章 Turn Loop 与对话引擎：Conversation Runtime
+# 第6章 Turn Loop 与对话引擎：Conversation Runtime
 
 ## 本章概览
 
@@ -11,7 +11,7 @@ Turn Loop 要解决的核心问题是：Agent 如何把"用户输入一句话"�
 | `rust/crates/runtime/src/conversation.rs` | `ConversationRuntime`、`run_turn`、事件组装、遥测 |
 | `rust/crates/runtime/src/compact.rs` | 会话压缩，摘要+保留 |
 
-## 11.1 数据类型与 Trait 设计
+## 6.1 数据类型与 Trait 设计
 
 ### ApiRequest 与 AssistantEvent
 
@@ -125,7 +125,7 @@ where
 
 `max_iterations` 限制循环最大迭代次数——防止模型无限请求工具导致死循环。默认值通常设为 20-50 次。`auto_compaction_input_tokens_threshold` 是自动压缩的 token 阈值——累计 input tokens 超过此值时触发压缩。
 
-## 11.2 run_turn 核心循环
+## 6.2 run_turn 核心循环
 
 ### 阶段一：会话健康检查
 
@@ -443,7 +443,7 @@ fn run_session_health_probe(&mut self) -> Result<(), String> {
 
 `TurnSummary` 包含本轮所有助手消息、工具结果、缓存事件、迭代次数和累计 token 用量。`record_turn_completed` 记录遥测事件。`Ok(summary)` 返回成功结果。
 
-## 11.3 build_assistant_message：流式事件组装
+## 6.3 build_assistant_message：流式事件组装
 
 `build_assistant_message` 把 `Vec<AssistantEvent>` 转换为结构化的 `ConversationMessage`：
 
@@ -532,7 +532,7 @@ fn flush_text_block(text: &mut String, blocks: &mut Vec<ContentBlock>) {
 
 第一个校验：`!finished` 表示没有收到 `MessageStop`——流可能因为网络中断或服务器错误被截断。第二个校验：`blocks.is_empty()` 表示流没有产生任何内容——即使有 `MessageStop` 但没有实际内容也是错误。这两个校验确保进入 session 的消息都是完整的。
 
-## 11.4 自动压缩与上下文管理
+## 6.4 自动压缩与上下文管理
 
 长对话会累积大量消息，最终超过模型的上下文窗口。`ConversationRuntime` 在每次 API 调用返回后检查是否需要自动压缩：
 
@@ -619,7 +619,7 @@ fn parse_auto_compaction_threshold(value: Option<&str>) -> u32 {
 
 注释说明这是一个 bug fix，确保即使最后一轮迭代（没有工具调用的终轮）也会检查压缩。如果没有这个检查，最后一轮的消息不会被压缩，session 会无限增长。
 
-## 11.5 会话追踪与遥测
+## 6.5 会话追踪与遥测
 
 `ConversationRuntime` 通过 `SessionTracer` 记录 turn 的完整生命周期事件。tracer 是可选的，只在显式配置时生效：
 
@@ -664,7 +664,7 @@ turn 生命周期包含六个关键事件点：
 | `turn_completed` | TurnSummary 组装后 | `iterations`、`assistant_messages`、`tool_results`、`prompt_cache_events` |
 | `turn_failed` | 任何阶段出错时 | `iteration`、`error` |
 
-## 11.6 测试设施
+## 6.6 测试设施
 
 `StaticToolExecutor` 是 `ToolExecutor` trait 的内存实现，用于测试和轻量集成：
 
@@ -749,9 +749,9 @@ Turn Loop 在 Rust 端以 `ConversationRuntime`（`conversation.rs`）为生产�
 
 | 关键文件 | 核心机制 | 对应章节 |
 | --- | --- | --- |
-| `rust/crates/runtime/src/conversation.rs` | `ConversationRuntime`、`run_turn`、trait 注入 | 11.1-11.2 |
-| `rust/crates/runtime/src/conversation.rs` | `build_assistant_message`、事件组装 | 11.3 |
-| `rust/crates/runtime/src/conversation.rs` | `maybe_auto_compact`、`SessionTracer` | 11.4-11.5 |
-| `rust/crates/runtime/src/compact.rs` | `compact_session`、`CompactionConfig` | 11.4 |
+| `rust/crates/runtime/src/conversation.rs` | `ConversationRuntime`、`run_turn`、trait 注入 | 6.1-6.2 |
+| `rust/crates/runtime/src/conversation.rs` | `build_assistant_message`、事件组装 | 6.3 |
+| `rust/crates/runtime/src/conversation.rs` | `maybe_auto_compact`、`SessionTracer` | 6.4-6.5 |
+| `rust/crates/runtime/src/compact.rs` | `compact_session`、`CompactionConfig` | 6.4 |
 
-下一章将分析多 Agent 任务编排——`TaskRegistry` 如何管理子 Agent 任务状态，`TeamRegistry` 如何维护团队关系，以及 `LaneBoard` 如何按状态分组展示任务进度。
+下一章将分析工具系统——`GlobalToolRegistry` 如何管理 55 个工具规范，`ToolSpec` 如何定义工具的 JSON Schema 和权限要求，以及 `ToolSearch` 的延迟发现机制。

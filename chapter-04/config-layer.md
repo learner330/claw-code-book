@@ -79,28 +79,28 @@ impl RuntimeConfig {
 
 | 字段 | 配置来源（`settings.json` 键） | 消费子系统 | 详细分析章节 |
 | --- | --- | --- | --- |
-| `hooks` | `hooks` | `HookRunner` | 第10章 |
-| `plugins` | `plugins` | 插件生命周期管理器 | 第7章 |
-| `mcp` | `mcpServers` | `McpServerManager` | 第7章 |
-| `oauth` | `oauth` | `McpClientAuth` | 第7章 |
+| `hooks` | `hooks` | `HookRunner` | 第11章 |
+| `plugins` | `plugins` | 插件生命周期管理器 | 第8章 |
+| `mcp` | `mcpServers` | `McpServerManager` | 第8章 |
+| `oauth` | `oauth` | `McpClientAuth` | 第8章 |
 | `model` | `model` | `ProviderClient` 路由 | 第3章（溯源）、第5章（API） |
 | `aliases` | `modelAliases` | 模型别名解析 | 第5章 |
-| `permission_mode` | `permissionMode` | `PermissionEnforcer` | 第3章（溯源）、第8章（权限） |
-| `permission_rules` | `permissions` | `PermissionPolicy` | 第8章 |
+| `permission_mode` | `permissionMode` | `PermissionEnforcer` | 第3章（溯源）、第9章（权限） |
+| `permission_rules` | `permissions` | `PermissionPolicy` | 第9章 |
 | `sandbox` | `sandbox` | 文件系统隔离（扩展内容） | — |
 | `provider_fallbacks` | `providerFallbacks` | 多 provider 降级路由 | 第5章 |
-| `trusted_roots` | `trustedRoots` | `TrustResolver` | 第8章 |
+| `trusted_roots` | `trustedRoots` | `TrustResolver` | 第9章 |
 | `api_timeout` | `apiTimeout` | HTTP 客户端 | 第5章 |
-| `rules_import` | `rulesImport` | `ProjectContext` / 系统提示词构建 | 第11章 |
+| `rules_import` | `rulesImport` | `ProjectContext` / 系统提示词构建 | 第6章 |
 | `provider` | `provider` | `ProviderClient` | 第5章 |
 
 这个表格的价值在于定位——当读者想知道"某个配置项影响系统的哪个部分"时，不需要在源码中搜索，可以直接查表找到对应的章节。
 
-`rules_import` 的 `RulesImportConfig` 控制是否导入外部 AI 编程框架的规则文件（Cursor、GitHub Copilot、Windsurf 等），有三种模式：`Auto` 自动检测导入、`None` 不导入、`List(Vec<String>)` 只导入指定框架。这是系统提示词构建的一部分（影响模型"知道什么"），详细实现分析在第11章的 `ProjectContext` 部分。
+`rules_import` 的 `RulesImportConfig` 控制是否导入外部 AI 编程框架的规则文件（Cursor、GitHub Copilot、Windsurf 等），有三种模式：`Auto` 自动检测导入、`None` 不导入、`List(Vec<String>)` 只导入指定框架。这是系统提示词构建的一部分（影响模型"知道什么"），详细实现分析在第6章的 `ProjectContext` 部分。
 
 `PolicyEngine` 的规则配置（`policy_rules`）也来自 `settings.json`，但 `PolicyEngine` 本身是 Lane 工作流的自动化决策引擎，与权限系统的 `PermissionPolicy` 不同——前者评估 Lane 生命周期状态并决定自动化动作，后者评估单次工具调用的授权。`PolicyEngine` 的详细实现分析在第12章。
 
-`Skills` 和 `SlashCommand` 的配置（`skills` 目录、`commands` 解析规则）来自文件系统和 `settings.json`，但 Skills 的发现、调用分发和 Commands 的解析架构属于 CLI 交互层，详细实现分析在第3章。
+`Skills` 和 `SlashCommandSpec` 的配置（`skills` 目录、`commands` 解析规则）来自文件系统和 `settings.json`，但 Skills 的发现、调用分发和 Commands 的解析架构属于 CLI 交互层，详细实现分析在第3章。
 
 ## 小结
 

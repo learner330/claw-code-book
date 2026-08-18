@@ -1,4 +1,4 @@
-# 第8章 权限系统：Agent 的安全边界
+# 第9章 权限系统：Agent 的安全边界
 
 ## 本章概览
 
@@ -13,7 +13,7 @@ Agent 能执行 shell 命令和文件读写，天然具有破坏系统的能力�
 | `rust/crates/runtime/src/trust_resolver.rs` | 工作区信任决策，白名单，手动审批 |
 | `rust/crates/runtime/src/policy_engine.rs` | Lane 工作流策略引擎，条件-动作规则 |
 
-## 8.1 权限模式：五级偏序模型
+## 9.1 权限模式：五级偏序模型
 
 Rust 端将权限抽象为五个层级，形成偏序关系：
 
@@ -65,7 +65,7 @@ impl PermissionMode {
 
 `match self` 是穷尽的——编译器保证所有变体都被处理。`Self::ReadOnly` 是 `PermissionMode::ReadOnly` 的简写，在 `impl` 块内可以用 `Self` 代替类型名。
 
-## 8.2 PermissionPolicy：规则引擎与授权评估
+## 9.2 PermissionPolicy：规则引擎与授权评估
 
 ### PermissionPolicy 结构
 
@@ -453,7 +453,7 @@ impl PermissionRule {
 
 CLI 前端实现这个接口，在 `decide` 方法中显示提示并等待用户输入。非交互环境（如 CI）不提供 prompter，所有需要确认的操作自动拒绝。
 
-## 8.3 PermissionEnforcer：执行层
+## 9.3 PermissionEnforcer：执行层
 
 ### EnforcementResult
 
@@ -549,7 +549,7 @@ pub fn check_with_required_mode(
 }
 ```
 
-这个方法不查规则，只做权限级别比较，`active_mode >= required_mode`。如果当前级别满足动态要求的级别，允许；否则拒绝。这个方法被 `execute_tool_with_enforcer` 调用（第6章），用于 bash 命令分类后的权限检查，`classify_bash_permission` 把 `ls` 命令降级为 `WorkspaceWrite`，然后 `check_with_required_mode` 检查 `active_mode >= WorkspaceWrite`。
+这个方法不查规则，只做权限级别比较，`active_mode >= required_mode`。如果当前级别满足动态要求的级别，允许；否则拒绝。这个方法被 `execute_tool_with_enforcer` 调用（第7章），用于 bash 命令分类后的权限检查，`classify_bash_permission` 把 `ls` 命令降级为 `WorkspaceWrite`，然后 `check_with_required_mode` 检查 `active_mode >= WorkspaceWrite`。
 
 ### check_file_write：工作区边界检查
 
@@ -654,7 +654,7 @@ fn lexically_normalize(path: &str) -> String {
 
 `stack.pop()` 在栈为空时返回 `None` 但不报错，所以 `..` 超出根目录时被截断。词法规范化不访问文件系统——这是关键设计。写入操作的目标路径可能还不存在（新文件），无法用 `canonicalize` 解析符号链接。词法规范化不依赖文件系统存在性，始终能正确折叠 `..`。代价是无法检测符号链接逃逸——但 `resolve()` 可以在更高层做符号链接解析，两者互补。
 
-## 8.4 TrustResolver：工作区信任
+## 9.4 TrustResolver：工作区信任
 
 `trust_resolver.rs` 实现了工作区信任决策。当 Agent 首次进入一个新目录时，系统需要判断这个目录是否可信：
 
@@ -703,14 +703,14 @@ pub enum TrustResolution {
 
 `TrustRequired` 在需要信任决策时发出。`TrustResolved` 在信任被解决时发出，携带应用的策略和解决方式。`TrustDenied` 在信任被拒绝时发出。这些事件可以被 SessionTracer 记录，用于后续审计。
 
-## 8.5 PolicyEngine 与权限系统的关系
+## 9.5 PolicyEngine 与权限系统的关系
 
 `policy_engine.rs` 为 Lane 工作流提供策略规则引擎，但其条件-动作评估模型与 `PermissionPolicy` 有结构相似性。两者都使用"条件匹配 → 动作执行"的模式：
 
 - `PermissionPolicy` 的 `PermissionRule` 评估单次工具调用，条件面向工具名称和输入参数，动作是 Allow/Deny/Ask 决策。
 - `PolicyEngine` 的 `PolicyRule` 评估 Lane 生命周期状态，条件面向 `LaneContext`（green level、分支新鲜度、审查状态等），动作是 MergeToDev、Retry、CloseoutLane 等工作流操作。
 
-这种相似性不是巧合——claw-code 的权限系统和任务编排系统共享了"规则引擎"这一抽象，但面向不同的领域（安全授权 vs 工作流自动化）。`PolicyEngine` 的详细实现（包括 `PolicyCondition` 的组合逻辑、`LaneContext` 的 12 维状态快照、`PolicyAction::Chain` 的动作组合、`evaluate_with_events` 的评估流程）在第12章多 Agent 任务编排中展开，与 `TaskRegistry` 和 `LaneBoard` 的协同工作一并分析。
+这种相似性不是巧合——claw-code 的权限系统和任务编排系统共享了"规则引擎"这一抽象，但面向不同的领域（安全授权 vs 工作流自动化）。`PolicyEngine` 的详细实现（包括 `PolicyCondition` 的组合逻辑、`LaneContext` 的 12 维状态快照、`PolicyAction::Chain` 的动作组合、`evaluate_with_events` 的评估流程）在第12章任务与团队注册表中展开，与 `TaskRegistry` 和 `LaneBoard` 的协同工作一并分析。
 
 ## 小结
 
@@ -720,8 +720,8 @@ pub enum TrustResolution {
 
 | 关键文件 | 核心机制 | 对应章节 |
 | --- | --- | --- |
-| `rust/crates/runtime/src/permissions.rs` | `PermissionMode`、`PermissionPolicy`、规则引擎 | 8.1-8.2 |
-| `rust/crates/runtime/src/permission_enforcer.rs` | `PermissionEnforcer`、路径规范化、命令分类 | 8.3 |
-| `rust/crates/runtime/src/trust_resolver.rs` | `TrustPolicy`、`TrustAllowlistEntry` | 8.4 |
+| `rust/crates/runtime/src/permissions.rs` | `PermissionMode`、`PermissionPolicy`、规则引擎 | 9.1-9.2 |
+| `rust/crates/runtime/src/permission_enforcer.rs` | `PermissionEnforcer`、路径规范化、命令分类 | 9.3 |
+| `rust/crates/runtime/src/trust_resolver.rs` | `TrustPolicy`、`TrustAllowlistEntry` | 9.4 |
 
 下一章将分析会话管理——`Session` 结构如何存储对话历史，`ContentBlock` 枚举如何表示消息内容，以及 `compact_session` 如何在 token 超限前压缩历史。

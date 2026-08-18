@@ -10,7 +10,7 @@
       "km_doc_id": "2755123767",
       "source_files": [],
       "output_path": "chapter-00/intro.md",
-      "status": "pending"
+      "status": "completed"
     },
     {
       "number": 1,
@@ -18,11 +18,11 @@
       "km_doc_id": "2754327855",
       "source_files": [],
       "output_path": "chapter-01/what-is-agent.md",
-      "status": "pending"
+      "status": "completed"
     },
     {
       "number": 2,
-      "title": "整体架构全景：10 个 Crate 的模块地图与数据流",
+      "title": "整体架构全景：11 个 Crate 的模块地图与数据流",
       "km_doc_id": "2754827466",
       "source_files": [
         "rust/Cargo.toml",
@@ -30,7 +30,7 @@
         "rust/crates/runtime/src/lib.rs"
       ],
       "output_path": "chapter-02/architecture.md",
-      "status": "pending"
+      "status": "completed"
     },
     {
       "number": 3,
@@ -42,7 +42,7 @@
         "rust/crates/runtime/src/config.rs"
       ],
       "output_path": "chapter-03/startup.md",
-      "status": "pending"
+      "status": "completed"
     },
     {
       "number": 4,
@@ -55,7 +55,7 @@
         "rust/crates/commands/src/lib.rs"
       ],
       "output_path": "chapter-04/config-layer.md",
-      "status": "pending"
+      "status": "completed"
     },
     {
       "number": 5,
@@ -69,22 +69,33 @@
         "rust/crates/api/src/prompt_cache.rs"
       ],
       "output_path": "chapter-05/api.md",
-      "status": "pending"
+      "status": "completed"
     },
     {
       "number": 6,
-      "title": "工具系统：ToolPool 与 40 个工具规范",
+      "title": "Turn Loop 与对话引擎：Conversation Runtime",
+      "km_doc_id": "2754337746",
+      "source_files": [
+        "rust/crates/runtime/src/conversation.rs",
+        "rust/crates/runtime/src/prompt.rs"
+      ],
+      "output_path": "chapter-06/turn-loop.md",
+      "status": "completed"
+    },
+    {
+      "number": 7,
+      "title": "工具系统：55 个工具规范",
       "km_doc_id": "2754297997",
       "source_files": [
         "rust/crates/tools/src/lib.rs",
         "rust/crates/runtime/src/file_ops.rs",
         "rust/crates/runtime/src/bash.rs"
       ],
-      "output_path": "chapter-06/tools.md",
-      "status": "pending"
+      "output_path": "chapter-07/tools.md",
+      "status": "completed"
     },
     {
-      "number": 7,
+      "number": 8,
       "title": "MCP 协议与外部工具连接",
       "km_doc_id": "2754947156",
       "source_files": [
@@ -93,24 +104,23 @@
         "rust/crates/runtime/src/mcp_client.rs",
         "rust/crates/plugins/src/lib.rs"
       ],
-      "output_path": "chapter-07/mcp.md",
-      "status": "pending"
+      "output_path": "chapter-08/mcp.md",
+      "status": "completed"
     },
     {
-      "number": 8,
+      "number": 9,
       "title": "权限系统：Agent 的安全边界",
       "km_doc_id": "2754857217",
       "source_files": [
         "rust/crates/runtime/src/permission_enforcer.rs",
         "rust/crates/runtime/src/permissions.rs",
-        "rust/crates/runtime/src/policy_engine.rs",
         "rust/crates/runtime/src/trust_resolver.rs"
       ],
-      "output_path": "chapter-08/permissions.md",
-      "status": "pending"
+      "output_path": "chapter-09/permissions.md",
+      "status": "completed"
     },
     {
-      "number": 9,
+      "number": 10,
       "title": "会话管理：Session 状态机与自动压缩",
       "km_doc_id": "2754258146",
       "source_files": [
@@ -118,41 +128,31 @@
         "rust/crates/runtime/src/compact.rs",
         "rust/crates/runtime/src/session_control.rs"
       ],
-      "output_path": "chapter-09/session.md",
-      "status": "pending"
+      "output_path": "chapter-10/session.md",
+      "status": "completed"
     },
     {
-      "number": 10,
+      "number": 11,
       "title": "钩子系统：用户自定义拦截",
       "km_doc_id": "2754397994",
       "source_files": [
         "rust/crates/runtime/src/hooks.rs",
         "rust/crates/plugins/src/hooks.rs"
       ],
-      "output_path": "chapter-10/hooks.md",
-      "status": "pending"
-    },
-    {
-      "number": 11,
-      "title": "Turn Loop 与对话引擎：Conversation Runtime",
-      "km_doc_id": "2754337746",
-      "source_files": [
-        "rust/crates/runtime/src/conversation.rs",
-        "rust/crates/runtime/src/prompt.rs"
-      ],
-      "output_path": "chapter-11/turn-loop.md",
-      "status": "pending"
+      "output_path": "chapter-11/hooks.md",
+      "status": "completed"
     },
     {
       "number": 12,
-      "title": "协调器：TaskRegistry 与 Team/Cron 编排",
+      "title": "任务与团队注册表：TaskRegistry、TeamRegistry 与 CronRegistry",
       "km_doc_id": "2754737259",
       "source_files": [
         "rust/crates/runtime/src/task_registry.rs",
-        "rust/crates/runtime/src/team_cron_registry.rs"
+        "rust/crates/runtime/src/team_cron_registry.rs",
+        "rust/crates/runtime/src/policy_engine.rs"
       ],
       "output_path": "chapter-12/coordinator.md",
-      "status": "pending"
+      "status": "completed"
     },
     {
       "number": 13,
@@ -166,7 +166,7 @@
         "rust/scripts/run_mock_parity_diff.py"
       ],
       "output_path": "chapter-13/testing.md",
-      "status": "pending"
+      "status": "completed"
     },
     {
       "number": 14,
@@ -174,7 +174,7 @@
       "km_doc_id": "",
       "source_files": [],
       "output_path": "chapter-14/summary.md",
-      "status": "pending"
+      "status": "completed"
     }
   ]
 }

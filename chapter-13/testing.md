@@ -723,7 +723,7 @@ fn detects_known_upstream_command_symbols() {
 `compat-harness` 的输出是结构化的 `ExtractedManifest`，包含三个清单。对比流程（在 CI 脚本或人工审查中）通常是：
 
 1. 运行 `extract_manifest` 提取 upstream 清单
-2. 读取 Rust 端的 `SLASH_COMMAND_SPECS`（第4章）和 `mvp_tool_specs`（第6章）
+2. 读取 Rust 端的 `SLASH_COMMAND_SPECS`（第4章）和 `mvp_tool_specs`（第7章）
 3. 对比名称集合，找出 upstream 有但 Rust 端缺少的符号
 4. 对缺失符号进行分类：有意省略（社区扩展内容）、尚未实现（需要跟进）、未知遗漏（需要调查）
 

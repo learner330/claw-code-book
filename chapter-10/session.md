@@ -1,4 +1,4 @@
-# 第9章 会话管理：Session 状态机与自动压缩
+# 第10章 会话管理：Session 状态机与自动压缩
 
 ## 本章概览
 
@@ -12,7 +12,7 @@
 | `rust/crates/runtime/src/compact.rs` | `compact_session` 自动压缩、摘要生成、边界保留 |
 | `rust/crates/runtime/src/session_control.rs` | `SessionStore` 工作区隔离、会话列表、恢复、分叉 |
 
-## 9.1 消息模型：ContentBlock 与 ConversationMessage
+## 10.1 消息模型：ContentBlock 与 ConversationMessage
 
 会话的核心数据结构是 `ContentBlock` 枚举，表示消息内容的四种类型：
 
@@ -90,7 +90,7 @@ impl ConversationMessage {
 
 `user_text` 创建单文本块的 `User` 消息。`assistant` 创建 `Assistant` 消息，需要传入完整的 blocks 列表。`tool_result` 创建 `Tool` 消息，包装 `ContentBlock::ToolResult`。
 
-## 9.2 Session 结构：状态与生命周期
+## 10.2 Session 结构：状态与生命周期
 
 `Session` 是会话的完整状态容器：
 
@@ -190,7 +190,7 @@ impl Session {
 
 如果文件不存在或为空，写入完整快照（`save_to_path` 调用 `render_jsonl_snapshot`）。否则以追加模式写入单条消息记录。增量写入避免每次 `push_message` 都重写整个文件——长期会话可能有几 MB 历史，增量写入是 O(1) 而不是 O(n)。
 
-## 9.3 持久化格式：JSONL 与原子写入
+## 10.3 持久化格式：JSONL 与原子写入
 
 会话支持两种持久化格式：JSON（旧版）和 JSONL（新版）。`save_to_path` 统一使用 JSONL 格式。
 
@@ -269,7 +269,7 @@ const MAX_ROTATED_FILES: usize = 3;
 
 当会话文件超过 256 KB 时触发轮转——保存快照到新文件，删除旧轮转文件，保留最多 3 个历史版本。这个机制防止单文件无限增长，同时保留最近的几个版本用于恢复。
 
-## 9.4 工作区隔离：SessionStore
+## 10.4 工作区隔离：SessionStore
 
 `SessionStore` 按工作区目录隔离会话存储，避免多个项目共用全局目录导致的冲突：
 
@@ -439,7 +439,7 @@ FNV-1a 是快速非加密哈希，适合目录分区。`0xcbf2_9ce4_8422_2325` �
 
 别名引用允许跨工作区恢复——只打印警告不报错。显式 ID 引用仍然强制工作区匹配。这个设计允许用户从任意目录恢复最近会话，同时保留显式引用的安全验证。
 
-## 9.5 自动压缩：Compaction
+## 10.5 自动压缩：Compaction
 
 ### CompactionConfig 与触发条件
 
@@ -648,7 +648,7 @@ fn merge_compact_summaries(existing_summary: Option<&str>, new_summary: &str) ->
 
 关键设计：旧摘要的要点被扁平化直接列出，不重新嵌套在 "- Previously compacted context:" 下。注释说明这是为了避免嵌套层次随压缩次数指数增长。如果每次压缩都把旧摘要作为子项，第 n 次压缩的深度是 O(n)，token 开销也是 O(n²)。扁平化后每次压缩的摘要大小只与单次内容相关，与历史无关。
 
-## 9.6 会话分叉：Fork
+## 10.6 会话分叉：Fork
 
 `fork` 方法创建会话副本：
 
@@ -702,8 +702,8 @@ fn merge_compact_summaries(existing_summary: Option<&str>, new_summary: &str) ->
 
 | 关键文件 | 核心机制 | 对应章节 |
 | --- | --- | --- |
-| `rust/crates/runtime/src/session.rs` | `Session`、`ContentBlock`、JSONL 序列化、增量持久化 | 9.1-9.3 |
-| `rust/crates/runtime/src/session_control.rs` | `SessionStore`、工作区指纹、会话恢复、分叉 | 9.4, 9.6 |
-| `rust/crates/runtime/src/compact.rs` | `compact_session`、`summarize_messages`、摘要合并 | 9.5 |
+| `rust/crates/runtime/src/session.rs` | `Session`、`ContentBlock`、JSONL 序列化、增量持久化 | 10.1-10.3 |
+| `rust/crates/runtime/src/session_control.rs` | `SessionStore`、工作区指纹、会话恢复、分叉 | 10.4, 10.6 |
+| `rust/crates/runtime/src/compact.rs` | `compact_session`、`summarize_messages`、摘要合并 | 10.5 |
 
 下一章将分析Hooks系统——`HookRunner` 如何在工具执行前后插入用户自定义逻辑，PreToolUse 和 PostToolUse 钩子如何修改输入、覆盖权限和追加反馈。

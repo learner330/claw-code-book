@@ -649,4 +649,4 @@ API 层通过 `ProviderClient` 枚举实现了多 Provider 的统一封装。`fr
 | `rust/crates/api/src/prompt_cache.rs` | 本地缓存、指纹、统计 | 5.6 |
 | `rust/crates/api/src/http_client.rs` | 超时、代理配置 | 5.7 |
 
-下一章将分析工具系统——`GlobalToolRegistry` 如何管理 40+ 个工具规范，`ToolSpec` 如何定义工具的 JSON Schema 和权限要求，以及 `ToolSearch` 的延迟发现机制。
+下一章将分析 Turn Loop 与对话引擎——`ConversationRuntime` 如何循环调用模型和工具，`run_turn` 如何组装请求和解析 SSE 流，以及 `build_assistant_message` 如何从流式事件构建助手消息。

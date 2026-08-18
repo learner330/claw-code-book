@@ -1,4 +1,4 @@
-# 第6章 工具系统：ToolPool 与 40 个工具规范
+# 第7章 工具系统：55 个工具规范
 
 ## 本章概览
 
@@ -12,7 +12,7 @@
 | `rust/crates/runtime/src/file_ops.rs` | 文件读写、编辑、搜索的实现 |
 | `rust/crates/runtime/src/bash.rs` | Bash 命令执行与沙箱 |
 
-## 6.1 工具定义：ToolSpec 与 RuntimeToolDefinition
+## 7.1 工具定义：ToolSpec 与 RuntimeToolDefinition
 
 `ToolSpec` 是内置工具的静态规格定义：
 
@@ -36,7 +36,7 @@ pub struct ToolSpec {
 
 `input_schema` 是 `Value` 类型（`serde_json::Value`），包含 JSON Schema 格式的输入参数定义。LLM 根据 schema 生成符合格式的参数。用 `Value` 而不是具体结构体，是因为不同工具的参数结构差异巨大：`bash` 接受 `command` 字符串，`grep_search` 接受 `pattern` + `path` + `glob` + 多个 flag。统一的 `Value` 避免为每个工具定义一个结构体。
 
-`required_permission` 是 `PermissionMode` 枚举，定义该工具的静态权限要求。三个核心级别从低到高：`ReadOnly`（只读，如 `read_file`）、`WorkspaceWrite`（写工作区，如 `write_file`）、`DangerFullAccess`（完全访问，如 `bash`）。这个字段是静态声明——工具规格中写死的权限要求，但实际执行时可能被动态分类函数调整（6.5 节展开）。
+`required_permission` 是 `PermissionMode` 枚举，定义该工具的静态权限要求。三个核心级别从低到高：`ReadOnly`（只读，如 `read_file`）、`WorkspaceWrite`（写工作区，如 `write_file`）、`DangerFullAccess`（完全访问，如 `bash`）。这个字段是静态声明——工具规格中写死的权限要求，但实际执行时可能被动态分类函数调整（7.5 节展开）。
 
 `RuntimeToolDefinition` 是运行时动态注册的工具定义，与 `ToolSpec` 结构类似但字段类型从 `&'static str` 变为 `String`：
 
@@ -54,7 +54,7 @@ pub struct RuntimeToolDefinition {
 
 `Option<String>` 表示描述可以省略——运行时注册的工具（如 MCP 服务器提供的工具）不一定有描述。用 `String` 而不是 `&'static str`，是因为这些工具名在运行时动态产生（如从 MCP 服务器的 JSON 响应中解析），编译时不存在。
 
-## 6.2 GlobalToolRegistry 三层注册
+## 7.2 GlobalToolRegistry 三层注册
 
 `GlobalToolRegistry` 是 Rust 端工具注册表的核心，持有三层数据：
 
@@ -239,9 +239,9 @@ pub fn canonical_allowed_tool_name(value: &str) -> String {
 
 这个函数的算法是逐字符扫描，在大写字母前插入下划线。但有一个条件：前一个字符必须是小写或数字，或者下一个字符是小写。这避免了在连续大写（如 `HTTPServer`）中每个字母间都插下划线——`HTTP` 变成 `http`，不会变成 `h_t_t_p`。
 
-## 6.3 内置工具清单与延迟发现
+## 7.3 内置工具清单与延迟发现
 
-`mvp_tool_specs()` 返回所有内置工具的静态规格。这个名字中的 "mvp" 指的是"最小可行产品"——这些工具是 Agent 运行所需的最小集合。实际上返回的工具远不止"最小"，包含了 40+ 个工具。
+`mvp_tool_specs()` 返回所有内置工具的静态规格。这个名字中的 "mvp" 指的是"最小可行产品"——这些工具是 Agent 运行所需的最小集合。实际上返回的工具远不止"最小"，包含了 55 个工具。
 
 前六个是基础工具，始终对 LLM 可见：
 
@@ -275,7 +275,7 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
 
 `bash` 工具的 schema 值得仔细看。`command` 是必填字段（在 `required` 数组中），其余都是可选。`dangerouslyDisableSandbox` 字段名以 `dangerously` 开头，这是一个命名约定——告诉 LLM 和开发者这个选项有安全风险。`filesystemMode` 用枚举限制为三个值：`off`（不允许文件访问）、`workspace-only`（只允许工作区内）、`allow-list`（按白名单）。`additionalProperties: false` 禁止额外字段——LLM 不能传入 schema 中未定义的参数。
 
-`required_permission: PermissionMode::DangerFullAccess` 是静态声明，但实际执行时 `classify_bash_permission` 会根据命令内容动态降级（6.5 节展开）。
+`required_permission: PermissionMode::DangerFullAccess` 是静态声明，但实际执行时 `classify_bash_permission` 会根据命令内容动态降级（7.5 节展开）。
 
 接下来是文件操作工具：
 
@@ -341,7 +341,7 @@ fn deferred_tool_specs() -> Vec<ToolSpec> {
 
 `matches!` 宏做模式匹配——如果 `spec.name` 等于六个基础工具名中的任何一个，返回 `true`，`!` 取反后 `filter` 保留不匹配的（即延迟工具）。这个写法比 `if spec.name != "bash" && spec.name != "read_file" && ...` 简洁得多。
 
-为什么要延迟加载？因为 LLM 的上下文窗口有限。如果一次性把 40+ 个工具的 schema 全部发给 LLM，会消耗大量 token（每个工具的 schema 约 100-300 token，40 个工具就是 4000-12000 token）。大部分工具在一次对话中根本用不到。通过 `ToolSearch` 按需发现，LLM 只在需要时搜索工具，大大减少了 token 消耗。
+为什么要延迟加载？因为 LLM 的上下文窗口有限。如果一次性把 55 个工具的 schema 全部发给 LLM，会消耗大量 token（每个工具的 schema 约 100-300 token，55 个工具就是 5500-16500 token）。大部分工具在一次对话中根本用不到。通过 `ToolSearch` 按需发现，LLM 只在需要时搜索工具，大大减少了 token 消耗。
 
 `search_tool_specs` 是 `ToolSearch` 工具的底层实现，支持两种查询语法：
 
@@ -373,7 +373,7 @@ fn search_tool_specs(query: &str, max_results: usize, specs: &[SearchableToolSpe
 
 关键词评分模式把查询分词后，前缀 `+` 标记的词放入 `required` 列表（必须匹配），其余放入 `optional` 列表。评分规则有五个维度：词出现在工具名+描述组合文本中加 2 分；词完全等于工具名（小写）加 8 分；词是工具名的子串加 4 分；规范名完全匹配加 12 分（最高分）；规范化文本包含规范化词加 3 分。`required` 列表中的词必须全部出现，否则工具被过滤掉。
 
-## 6.4 工具执行分发与动态权限
+## 7.4 工具执行分发与动态权限
 
 `GlobalToolRegistry::execute` 是工具执行的入口：
 
@@ -532,12 +532,12 @@ fn maybe_enforce_permission_check_with_mode(
 
 工具系统通过 `ToolSpec` 结构体命令式完成工具定义——每个工具的定义是代码中的数据结构，不是注解。`GlobalToolRegistry` 采用三层架构：内置工具通过 `mvp_tool_specs()` 静态返回，插件工具通过 `with_plugin_tools` 注册并做冲突检测，运行时工具通过 `with_runtime_tools` 追加。`definitions()` 方法把三层合并为 `ToolDefinition` 列表发给 LLM，同时支持 `allowed_tools` 过滤。
 
-内置工具包含 40+ 个规范，其中六个基础工具始终对 LLM 可见，其余延迟工具通过 `ToolSearch` 的评分搜索按需发现。`execute_tool_with_enforcer` 是执行分发器，对涉及文件和 shell 的工具调用 `classify_*` 函数动态分类权限级别，再通过 `maybe_enforce_permission_check_with_mode` 做权限检查，最后调用 `run_*` 执行工具逻辑。动态权限分类让同一个 `bash` 工具根据命令内容在 `ReadOnly`、`WorkspaceWrite` 和 `DangerFullAccess` 之间切换。
+内置工具包含 55 个规范，其中六个基础工具始终对 LLM 可见，其余延迟工具通过 `ToolSearch` 的评分搜索按需发现。`execute_tool_with_enforcer` 是执行分发器，对涉及文件和 shell 的工具调用 `classify_*` 函数动态分类权限级别，再通过 `maybe_enforce_permission_check_with_mode` 做权限检查，最后调用 `run_*` 执行工具逻辑。动态权限分类让同一个 `bash` 工具根据命令内容在 `ReadOnly`、`WorkspaceWrite` 和 `DangerFullAccess` 之间切换。
 
 | 关键文件 | 核心机制 | 对应章节 |
 | --- | --- | --- |
-| `rust/crates/tools/src/lib.rs` | `ToolSpec`、`GlobalToolRegistry`、三层注册 | 6.1-6.2 |
-| `rust/crates/tools/src/lib.rs` | `mvp_tool_specs`、`deferred_tool_specs`、`search_tool_specs` | 6.3 |
-| `rust/crates/tools/src/lib.rs` | `execute_tool_with_enforcer`、`classify_bash_permission` | 6.4 |
+| `rust/crates/tools/src/lib.rs` | `ToolSpec`、`GlobalToolRegistry`、三层注册 | 7.1-7.2 |
+| `rust/crates/tools/src/lib.rs` | `mvp_tool_specs`、`deferred_tool_specs`、`search_tool_specs` | 7.3 |
+| `rust/crates/tools/src/lib.rs` | `execute_tool_with_enforcer`、`classify_bash_permission` | 7.4 |
 
 下一章将分析 MCP 协议与外部工具连接——`McpToolRegistry` 如何对接外部 MCP 服务器，`McpClientTransport` 如何抽象六种传输方式，以及 `McpServerManager` 如何管理服务器生命周期与降级启动。

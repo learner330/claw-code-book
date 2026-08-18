@@ -25,13 +25,13 @@ hero:
   <li><a href="/claw-code-book/chapter-03/startup"><span class="ch-num">第 3 章</span>启动流程</a></li>
   <li><a href="/claw-code-book/chapter-04/config-layer"><span class="ch-num">第 4 章</span>配置系统：运行时契约与子系统集成</a></li>
   <li><a href="/claw-code-book/chapter-05/api"><span class="ch-num">第 5 章</span>API 通信与模型交互</a></li>
-  <li><a href="/claw-code-book/chapter-06/tools"><span class="ch-num">第 6 章</span>工具系统</a></li>
-  <li><a href="/claw-code-book/chapter-07/mcp"><span class="ch-num">第 7 章</span>MCP 协议与外部工具连接</a></li>
-  <li><a href="/claw-code-book/chapter-08/permissions"><span class="ch-num">第 8 章</span>权限系统</a></li>
-  <li><a href="/claw-code-book/chapter-09/session"><span class="ch-num">第 9 章</span>会话管理</a></li>
-  <li><a href="/claw-code-book/chapter-10/hooks"><span class="ch-num">第 10 章</span>Hooks系统</a></li>
-  <li><a href="/claw-code-book/chapter-11/turn-loop"><span class="ch-num">第 11 章</span>Turn Loop 与对话引擎</a></li>
-  <li><a href="/claw-code-book/chapter-12/coordinator"><span class="ch-num">第 12 章</span>多 Agent 任务编排</a></li>
+  <li><a href="/claw-code-book/chapter-06/turn-loop"><span class="ch-num">第 6 章</span>Turn Loop 与对话引擎</a></li>
+  <li><a href="/claw-code-book/chapter-07/tools"><span class="ch-num">第 7 章</span>工具系统</a></li>
+  <li><a href="/claw-code-book/chapter-08/mcp"><span class="ch-num">第 8 章</span>MCP 协议与外部工具连接</a></li>
+  <li><a href="/claw-code-book/chapter-09/permissions"><span class="ch-num">第 9 章</span>权限系统</a></li>
+  <li><a href="/claw-code-book/chapter-10/session"><span class="ch-num">第 10 章</span>会话管理</a></li>
+  <li><a href="/claw-code-book/chapter-11/hooks"><span class="ch-num">第 11 章</span>Hooks系统</a></li>
+  <li><a href="/claw-code-book/chapter-12/coordinator"><span class="ch-num">第 12 章</span>任务与团队注册表</a></li>
   <li><a href="/claw-code-book/chapter-13/testing"><span class="ch-num">第 13 章</span>测试与源码审计</a></li>
   <li><a href="/claw-code-book/chapter-14/summary"><span class="ch-num">第 14 章</span>总结与展望</a></li>
 </ul>
