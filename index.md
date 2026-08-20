@@ -38,6 +38,12 @@ hero:
   <li><a href="/claw-code-book/chapter-14/summary"><span class="ch-num">第 14 章</span>总结与展望</a></li>
 </ul>
 
+### 间章：演进脉络
+
+<ul class="chapter-list">
+  <li><a href="/claw-code-book/chapter-interlude/evolution"><span class="ch-num">间章</span>从泄漏到重构：新增模块总览</a></li>
+</ul>
+
 ### 第二阶段：社区扩展与深层子系统
 
 <ul class="chapter-list">
@@ -55,7 +61,7 @@ hero:
 
 Claw Code 是 Claude Code 的公开 Rust 实现。本书逐模块拆解它的源码，从 CLI 入口到 Turn Loop，从工具系统到权限边界，从会话持久化到测试验证，覆盖 Agent 运行时的完整链路。第二阶段进一步深入社区扩展模块（claw-analog、RAG 服务、遥测、插件系统）和深层子系统（沙箱隔离、故障恢复、容器化部署），并对照 Python 原始实现讲解架构演进。
 
-全书 23 章（含导读），分为两个阶段：第一阶段 15 章聚焦核心运行时的主线链路；第二阶段 8 章覆盖独立扩展模块和源码审查后确认具有独立架构价值的深层子系统。代码片段来自 `claw-code/` 目录的实际文件（含 Rust 和 Python），标注了完整路径，可以在本地打开源码对照阅读。
+全书 24 章（含导读和间章），分为两个阶段：第一阶段 14 章聚焦核心运行时的主线链路；间章梳理项目演进脉络和新增模块概览；第二阶段 8 章覆盖独立扩展模块和源码审查后确认具有独立架构价值的深层子系统。代码片段来自 `claw-code/` 目录的实际文件（含 Rust 和 Python），标注了完整路径，可以在本地打开源码对照阅读。
 
 本书面向有开发经验的工程师。遇到 Rust 特有的语法时会做简要说明，重点放在设计思路和模块边界上。
 

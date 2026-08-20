@@ -14,7 +14,7 @@
     },
     {
       "number": 1,
-      "title": "什么是 Agent：Agent 与传统 CLI 的本质区别",
+      "title": "什么是 Agent：从工具调用到自主闭环",
       "km_doc_id": "2754327855",
       "source_files": [],
       "output_path": "chapter-01/what-is-agent.md",
@@ -22,7 +22,7 @@
     },
     {
       "number": 2,
-      "title": "整体架构全景：11 个 Crate 的模块地图与数据流",
+      "title": "架构总览：claw-code 的五层模型",
       "km_doc_id": "2754827466",
       "source_files": [
         "rust/Cargo.toml",

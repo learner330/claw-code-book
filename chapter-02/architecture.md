@@ -1,13 +1,28 @@
-# 第2章 整体架构全景：11 个 Crate 的模块地图与数据流
+# 第2章 架构总览：claw-code 的五层模型
 
 ## 本章概览
 
-本章是全书的模块索引，目的是方便读者知道每个 crate 的名字、位置、职责，以及各章分别分析哪个模块。
+本章把第 1 章的 Agent 通用框架映射到 claw-code 的具体实现，展示一个 Agent 系统如何从概念落地为代码。读完本章，你能建立 claw-code 的全局心智模型：一个用户请求从进入终端到返回结果，中间流经哪些模块、各模块职责是什么、它们如何协作。
 
+关键文件清单：
 
-## 2.1 Rust Workspace 概述
+| 路径 | 职责 |
+|------|------|
+| `claw-code/rust/Cargo.toml` | Workspace 定义，统一编译约束 |
+| `claw-code/rust/crates/rusty-claude-cli/` | CLI 入口层 |
+| `claw-code/rust/crates/runtime/` | 核心运行时，承载所有子系统 |
+| `claw-code/rust/crates/api/` | LLM API 通信层 |
+| `claw-code/rust/crates/tools/` | 内置工具定义 |
+| `claw-code/rust/crates/commands/` | 斜杠命令解析 |
+| `claw-code/rust/crates/plugins/` | 插件生命周期管理 |
 
-仓库的 `rust/` 目录是一个 Cargo workspace，所有 crate 通过 `Cargo.toml` 的 `[workspace]` 段统一管理。workspace 强制 `unsafe_code = "forbid"`，把内存安全作为硬约束。
+## 2.1 系统边界
+
+claw-code 是一个运行在终端中的编程助手。用户在终端输入目标（"帮我修好这个 bug"），claw-code 通过多轮工具调用自主完成任务并返回结果。
+
+从外部看，claw-code 是一个命令行程序。它接受文本输入、产生文本输出、读写文件系统、执行 Shell 命令。它没有图形界面，不依赖后台守护进程，所有状态存储在本地文件系统中。
+
+从内部看，claw-code 是一个按 Workspace 组织的 Rust 项目。Workspace 包含 11 个 crate，外加一个 Python 移植层（本书作为架构演进参考，不逐行分析）。
 
 ```toml
 # claw-code/rust/Cargo.toml
@@ -20,166 +35,122 @@ resolver = "2"
 unsafe_code = "forbid"
 ```
 
-`members = ["crates/*"]` 表示 workspace 自动包含 `crates/` 下的所有子目录。目前包含 11 个 crate，按代码规模排序如下：
+Workspace 强制 `unsafe_code = "forbid"`，把内存安全作为硬约束。所有 FFI 交互、底层系统调用都必须通过安全的抽象层完成，不能绕过 Rust 的所有权检查。
 
-| crate | 路径 | 职责 | 代码规模 | 对应章节 |
-| --- | --- | --- | --- | --- |
-| `runtime` | `rust/crates/runtime/` | 核心运行时：配置加载、Bootstrap、会话管理、权限引擎、MCP 通信、任务注册表、文件操作、Bash 执行 | ~41,700 LOC | 第3、4、7、8、9、10、11、12章 |
-| `rusty-claude-cli` | `rust/crates/rusty-claude-cli/` | CLI 入口、参数解析、TUI 渲染、模型/权限溯源 | ~30,800 LOC | 第3章 |
-| `api` | `rust/crates/api/` | HTTP 客户端、SSE 流式解析、多 provider 路由、prompt cache | ~11,900 LOC | 第5章 |
-| `tools` | `rust/crates/tools/` | 内置工具实现：文件操作、Bash 执行、代码搜索、任务调度等 55 个工具规范 | ~11,800 LOC | 第7章 |
-| `commands` | `rust/crates/commands/` | `/` 斜杠命令定义和分发 | ~7,200 LOC | 第3章（解析）、第4章（配置契约） |
-| `claw-analog` | `rust/crates/claw-analog/` | 轻量级代理外壳，适合 CI 和脚本场景 | ~4,800 LOC | — |
-| `plugins` | `rust/crates/plugins/` | 插件系统：安装、启用、禁用、生命周期管理、bundled hooks | ~4,500 LOC | 第7、10章 |
-| `mock-anthropic-service` | `rust/crates/mock-anthropic-service/` | 确定性 mock 服务，用于测试 harness | ~1,200 LOC | 第13章 |
-| `claw-rag-service` | `rust/crates/claw-rag-service/` | RAG 索引服务，基于 SQLite 的语义搜索 | ~1,100 LOC | — |
-| `telemetry` | `rust/crates/telemetry/` | Token 计数、成本追踪、遥测指标 | ~500 LOC | — |
-| `compat-harness` | `rust/crates/compat-harness/` | Python/Rust 一致性测试设施 | ~360 LOC | 第13章 |
+## 2.2 五层架构模型
 
-其中 `runtime` 是最大的 crate，承载了配置加载、Bootstrap 引导、会话管理、权限引擎、MCP 通信和任务注册表等多个子系统。`rusty-claude-cli` 虽然代码量也很大，但大部分是 TUI 渲染和输入处理逻辑。后续章节会逐个展开。
-
-## 2.2 一次完整交互的数据流
-
-当用户在终端输入 `claw "帮我写一个快速排序"` 时，数据依次流经以下模块：
-
-```mermaid
-graph TD
-    A[用户输入: claw "帮我写一个快速排序"] --> B[CLI 入口: rusty-claude-cli]
-    B --> C[参数解析: CliAction 枚举匹配]
-    C --> D[Bootstrap: 多阶段引导]
-    D --> E[配置加载: ConfigLoader 三层合并]
-    E --> F[工具注册: GlobalToolRegistry 加载 55 个工具规范]
-    F --> G[MCP 发现: McpServerManager 发现外部工具]
-    G --> H[权限初始化: PermissionEnforcer 设置 PermissionMode]
-    H --> I[会话创建: Conversation 初始化消息列表]
-    I --> S[系统提示词构建: prompt.rs 组装 ProjectContext]
-    S --> J[Turn Loop: ConversationRuntime 循环]
-    J --> K[LLM 调用: api crate 发送请求]
-    K --> L{LLM 要调用工具?}
-    L -->|是| M[权限检查: PermissionEnforcer 检查路径]
-    M --> N[工具执行: tools crate 执行操作]
-    N --> O[结果回填: 工具结果加入消息列表]
-    O --> J
-    L -->|否| P[输出最终结果]
-    P --> Q[会话存储: Session 持久化]
-```
-
-图中新增的"系统提示词构建"节点在会话创建和 Turn Loop 之间。`prompt.rs` 负责组装发给 LLM 的 `system` 字段，内容包括内置指令（如"你是一个编程助手"）、项目上下文（`.claw/rules/` 目录下的规则文件、`CLAUDE.md`）、工具列表描述（让 LLM 知道有哪些工具可用）、以及 `RulesImportConfig` 导入的外部框架规则（如 `.cursorrules`）。这个步骤决定了 LLM"知道自己能做什么、不能做什么"，是连接配置层与对话引擎的关键桥梁，详细实现在第6章。
-
-这条数据流贯穿了全书的核心章节。每个节点对应一章的源码分析：
-
-| 数据流节点 | 对应章节 | 对应模块 |
-| --- | --- | --- |
-| CLI 入口和参数解析 | 第3章 | `rusty-claude-cli` |
-| Bootstrap 多阶段引导 | 第3章 | `runtime::bootstrap` |
-| 配置三层合并 | 第3章 | `runtime::config` |
-| 配置运行时契约 | 第4章 | `runtime::config` |
-| API 通信与 SSE 流 | 第5章 | `api` crate |
-| 工具注册与执行 | 第7章 | `tools` crate |
-| MCP 工具发现 | 第8章 | `runtime::mcp_stdio` |
-| 权限初始化与检查 | 第9章 | `runtime::permission_enforcer` |
-| 会话创建与持久化 | 第10章 | `runtime::session` |
-| 钩子拦截 | 第11章 | `runtime::hooks` |
-| 系统提示词构建 | 第6章 | `runtime::prompt` |
-| Turn Loop 循环 | 第6章 | `runtime::conversation` |
-| 任务与团队协调 | 第12章 | `runtime::task_registry` |
-
-## 2.3 各章与模块的对应关系
-
-下表是全书的阅读导航图。读任何一章前，都可以回到这张表确认它在系统中的位置。"关键数据结构"列列出每章分析的核心类型名，方便在源码中定位：
-
-> **阅读提示**：第7～11章拆解的工具、MCP、权限、会话、钩子五个子系统，都是第6章 Turn Loop 循环里被调用的「零件」。第一次通读时建议先读第6章建立「循环长什么样」的整体概念，再回到这些子系统细节，理解每个零件如何被循环调用。
-
-| 章节 | 标题 | 分析的模块 | 关键数据结构 | 核心问题 |
-| --- | --- | --- | --- | --- |
-| 第1章 | 什么是 Agent | — | — | Agent 和传统 CLI 有什么不同 |
-| 第2章 | 整体架构全景 | — | — | 模块如何划分，数据如何流动 |
-| 第3章 | 启动流程 | `rusty-claude-cli` + `runtime::bootstrap` + `runtime::config` + `commands` | `CliAction`、`BootstrapPhase`、`BootstrapPlan`、`ConfigLoader`、`SlashCommandSpec`、`SkillCollection` | Bootstrap 如何工作，配置如何合并，命令如何解析 |
-| 第4章 | 配置系统 | `runtime::config` | `RuntimeFeatureConfig`、`ConfigLoader`、`ConfigFileReport` | 配置契约、字段消费方速查、校验机制 |
-| 第5章 | API 通信与模型交互 | `api` crate | `ProviderClient`、`SseParser`、`MessageRequest`、`MessageResponse`、`PromptCache` | 如何与 LLM 建立 SSE 流式连接 |
-| 第6章 | Turn Loop 与对话引擎 | `runtime::conversation` + `runtime::prompt` | `ConversationRuntime`、`run_turn`、`build_assistant_message`、`ApiRequest`、`ProjectContext` | Agent 如何循环决策，系统提示词如何构建 |
-| 第7章 | 工具系统 | `tools` crate | `ToolSpec`、`GlobalToolRegistry`、`ToolExecutor`、`classify_bash_permission` | Agent 如何定义和执行 55 个工具 |
-| 第8章 | MCP 协议与外部工具 | `runtime::mcp_*` + `plugins` | `McpServerManager`、`McpToolRegistry`、`McpClientTransport`、`PluginMetadata` | 如何连接外部工具和扩展 |
-| 第9章 | 权限系统 | `runtime::permission_enforcer` + `runtime::permissions` | `PermissionMode`、`PermissionPolicy`、`PermissionEnforcer`、`TrustResolver` | 如何限制 Agent 的操作范围 |
-| 第10章 | 会话管理 | `runtime::session` + `runtime::compact` | `Session`、`ContentBlock`、`ConversationMessage`、`SessionStore`、`compact_session` | 如何维护对话历史 |
-| 第11章 | Hooks系统 | `runtime::hooks` + `plugins::hooks` | `HookRunner`、`RuntimeHookCommand`、`HookProgressEvent` | 如何在关键节点插入处理 |
-| 第12章 | 任务与团队注册表 | `runtime::task_registry` + `runtime::team_cron_registry` | `TaskRegistry`、`LaneBoard`、`TeamRegistry`、`CronRegistry`、`PolicyEngine` | 任务/团队/定时状态如何管理 |
-| 第13章 | 测试与源码审计 | `mock-anthropic-service` + `compat-harness` | `MockAnthropicService`、`MockParityHarness`、`extract_manifest` | 如何保证行为正确性和覆盖率 |
-| 第14章 | 总结与展望 | — | — | 核心架构回顾与演进方向 |
-
-## 2.4 Crate 间依赖关系
-
-了解 crate 之间的编译依赖有助于理解"为什么某个模块不能引用另一个模块"。核心依赖链如下：
+claw-code 按职责从外到内分为五层，层与层之间是单向依赖——外层可以调用内层，内层不知道外层的存在。
 
 ```
-rusty-claude-cli (入口)
-    ├── runtime (核心运行时)
-    │   ├── api (HTTP 通信)
-    │   ├── tools (工具执行)
-    │   └── plugins (插件生命周期)
-    └── commands (命令解析)
-
-tools (工具定义)
-    └── runtime::task_registry (通过全局注册表)
+┌─────────────┐      ┌──────────┐      ┌──────────────┐
+│  终端用户    │ ───→ │ CLI入口层 │ ───→ │  运行时层     │
+└─────────────┘      └──────────┘      └──────────────┘
+                                               │
+              ┌────────────────────────────────┼────────────────────────────────┐
+              ↓                                ↓                                ↓
+        ┌──────────┐                     ┌──────────┐                    ┌──────────┐
+        │ 通信层    │                     │ 工具层    │                    │ 扩展层    │
+        └──────────┘                     └──────────┘                    └──────────┘
+              │                                │                                │
+              ↓                                ↓                                ↓
+        ┌──────────┐                     ┌──────────┐                    ┌──────────┐
+        │ LLM服务   │                     │ 文件系统  │                    │ MCP外部工具│
+        └──────────┘                     │ Shell环境 │                    └──────────┘
+                                         └──────────┘
 ```
 
-`rusty-claude-cli` 是顶层入口，依赖 `runtime` 和 `commands`。`runtime` 是最核心的 crate，依赖 `api`（HTTP 客户端）、`tools`（工具执行）和 `plugins`（插件管理）。`commands` 保持无运行时依赖的纯粹性——它只负责解析命令文本为结构化枚举，不参与任何 I/O 操作。
+这五层的职责：
 
-`tools` crate 表面上被 `runtime` 依赖（工具执行需要运行时上下文），但实际上 `tools` 中也通过 `OnceLock` 全局单例反向访问 `runtime::task_registry` 中的 `TeamRegistry` 和 `CronRegistry`。这种循环依赖通过全局单例在运行时解析，绕开了编译期的直接引用，避免了 Cargo 的循环依赖错误。
+**入口层**（rusty-claude-cli）负责程序启动、参数解析、TUI 渲染。它是用户交互的入口，但不包含任何 Agent 逻辑——它只做输入输出的搬运。
 
-`api` crate 独立程度最高——它只负责 HTTP 通信和 SSE 解析，不依赖 `runtime` 或 `tools`。这种设计允许 `api` 被单独测试，也可以在未来被其他项目复用。
+**运行时层**（runtime）是 Agent 的核心，包含六个子系统：Bootstrap 做启动引导，Config 做三层配置合并，Turn Loop 驱动对话引擎，Session 负责会话持久化，Permission 做权限控制，MCP 管理外部工具连接。
 
-## 2.5 源码目录结构速查
+**通信层**（api）封装与 LLM 的交互：HTTP 请求构造、SSE 流式响应解析、多 Provider 路由、prompt cache 管理。它是运行时层与外部 AI 服务之间的桥梁。
 
-初次接触 claw-code 源码时，以下目录结构帮助快速定位文件：
+**工具层**（tools）定义 Agent 的内置操作能力：文件读写、Bash 执行、代码搜索、任务调度等。工具层只负责工具规范（名称、参数 Schema、权限要求），具体执行由运行时层根据上下文完成。
+
+**扩展层**（plugins）通过 MCP 协议连接外部工具。内置工具是"出厂自带"的，外部工具是运行时动态发现的。
+
+## 2.3 核心 Crate 地图
+
+11 个 crate 按职责分为三组：
+
+| 分组 | Crate | 职责 |
+|------|-------|------|
+| 入口 | `rusty-claude-cli` | CLI 入口、参数解析、TUI |
+| 核心 | `runtime` | 所有运行时子系统 |
+| 核心 | `api` | LLM 通信 |
+| 核心 | `tools` | 内置工具定义 |
+| 核心 | `commands` | 斜杠命令解析 |
+| 核心 | `plugins` | 插件生命周期 |
+| 扩展 | `claw-analog` | 轻量代理外壳（CI/自动化场景） |
+| 扩展 | `claw-rag-service` | RAG 检索服务（基于 SQLite 的语义搜索） |
+| 扩展 | `telemetry` | 遥测与成本追踪 |
+| 测试 | `mock-anthropic-service` | Mock LLM 服务（测试用） |
+| 测试 | `compat-harness` | Python/Rust 一致性测试 |
+
+`runtime` 是核心中的核心，承载全部 Agent 子系统。`api` 独立程度最高——只负责 HTTP 通信，可以单独测试或复用。
+
+## 2.4 一次请求的完整生命周期
+
+用户在终端输入 `claw "帮我写一个快速排序"` 后，数据流经以下路径：
 
 ```
-claw-code/
-├── rust/
-│   ├── Cargo.toml              # Workspace 定义
-│   ├── crates/
-│   │   ├── rusty-claude-cli/   # CLI 入口 (第3章)
-│   │   │   └── src/main.rs
-│   │   ├── runtime/            # 核心运行时 (第3-12章)
-│   │   │   └── src/
-│   │   │       ├── bootstrap.rs
-│   │   │       ├── config.rs
-│   │   │       ├── conversation.rs
-│   │   │       ├── prompt.rs
-│   │   │       ├── session.rs
-│   │   │       ├── permission_enforcer.rs
-│   │   │       ├── hooks.rs
-│   │   │       ├── task_registry.rs
-│   │   │       └── mcp_*.rs
-│   │   ├── api/                # HTTP 通信 (第5章)
-│   │   │   └── src/
-│   │   │       ├── client.rs
-│   │   │       ├── sse.rs
-│   │   │       └── providers/
-│   │   ├── tools/              # 工具规范 (第7章)
-│   │   │   └── src/lib.rs
-│   │   ├── commands/           # 命令解析 (第3章)
-│   │   │   └── src/lib.rs
-│   │   ├── plugins/            # 插件系统 (第7、10章)
-│   │   │   └── src/lib.rs
-│   │   ├── mock-anthropic-service/  # 测试模拟 (第13章)
-│   │   ├── compat-harness/     # 兼容性审计 (第13章)
-│   │   ├── telemetry/          # 成本追踪
-│   │   ├── claw-analog/        # 轻量代理
-│   │   └── claw-rag-service/   # RAG 检索
-│   └── scripts/
-│       └── run_mock_parity_harness.sh
-└── src/                        # Python 参考实现（本书不分析）
+用户输入 → CLI入口 → Bootstrap引导 → 配置加载 → 工具注册 → 权限初始化 → 创建会话 → 构建系统提示词 → 进入TurnLoop
+                                                                                         ↓
+                                                                                  请求LLM → 解析输出
+                                                                                              │
+                                    ┌───────────────────────────────────────────────────────┼───────────────────────────┐
+                                    ↓                                                       ↓                           ↓
+                              [工具调用]                                              [权限审查]                    [文本回复]
+                                    │                                                       │                           ↓
+                                    │                                            ┌─────────┴─────────┐              输出结果
+                                    │                                            ↓                   ↓                  ↓
+                                    │                                        [允许]              [拒绝]           会话持久化
+                                    │                                            ↓                   ↓
+                                    │                                        执行工具 → 结果写入历史 → 回到请求LLM
+                                    │                                                                  ↑
+                                    └──────────────────────────────────────────────────────────────────┘
 ```
 
-带括号标注的是本书分析的章节。`runtime/src/` 下的文件最多——这是理解 claw-code 的核心目录，建议读者在阅读过程中保持该目录在编辑器中打开。
+这条路径展示了 Agent 从接收输入到产出输出的完整过程。其中有三个关键环节值得特别说明：
+
+**系统提示词构建**在 Turn Loop 启动之前。它把角色定义（"你是一个编程助手"）、项目上下文（`CLAUDE.md` 中的规则、`.claw/rules/` 目录下的约束）、可用工具列表、输出格式约束组装成发给 LLM 的 system 字段。LLM 在这个提示词的约束下做决策——工具列表里没有的能力，LLM 不会尝试调用。
+
+**权限审查**发生在 Turn Loop 内部。LLM 每次请求工具调用时，Permission 子系统先检查这个操作是否被允许。检查内容包括：操作类型（读/写/执行）、目标路径（是否在工作区内）、命令内容（是否包含危险指令）。审查结果有三级：允许执行、降级为只读、直接拒绝。
+
+**会话持久化**贯穿整个循环。每次工具执行结果、每次 LLM 响应都写入磁盘。这意味着用户关闭终端后再次打开，Agent 能恢复完整对话历史继续工作。
+
+## 2.5 核心设计决策
+
+claw-code 的架构反映了几个关键设计决策：
+
+单一运行时入口。所有 Agent 逻辑集中在 `runtime` crate，CLI 层只做参数解析和 I/O 渲染。好处是 Agent 逻辑不依赖特定的前端——今天可以是终端 TUI，明天可以换成 Web 接口，运行时层不需要改动。
+
+工具与执行分离。`tools` crate 只定义工具规范（名称、参数 Schema、权限要求），不包含执行逻辑。执行由 `runtime` 根据当前会话上下文决定。好处是工具定义可以静态枚举（便于展示能力列表），执行可以动态控制（根据权限策略、会话状态）。
+
+MCP 作为扩展点。内置工具是有限的，外部工具通过 MCP 协议接入。MCP 让第三方可以开发自己的工具服务器（数据库查询、浏览器操作、JIRA 集成），不需要修改 Agent 核心代码。
+
+会话持久化优先。每次工具调用、每次 LLM 响应都写入磁盘。这导致 session 子系统是 runtime 中最复杂的模块之一——它需要处理序列化、压缩、多分支恢复。
+
+Workspace 级安全约束。`unsafe_code = "forbid"` 不是 Agent 特有的设计，但它对 Agent 系统有特殊意义：Agent 会执行外部生成的命令、处理不受信任的文件内容，内存安全漏洞的后果比普通软件更严重。
+
+## 2.6 模块间的边界约束
+
+五层架构模型不只是逻辑划分，也约束了模块间的依赖方向：
+
+- 入口层可以调用运行时层，反之不行
+- 运行时层可以调用通信层、工具层、扩展层，反之不行
+- 通信层、工具层、扩展层相互不依赖
+
+这个单向依赖链保证了底层模块的稳定性——修改 `api` 的实现不会影响 `tools`，修改 `tools` 的定义不会影响 `runtime`。
+
+有一个例外：`tools` crate 通过全局单例反向访问 `runtime` 中的任务注册表。这种循环依赖在编译期是不允许的，所以用 `OnceLock` 延迟到运行时解析。这是实用主义对架构纯粹性的妥协。
 
 ## 小结
 
-claw-code 的 canonical runtime 是 `rust/` 下的 Cargo workspace，包含 11 个 crate，总计约 11.6 万行 Rust 代码。其中 `runtime` crate 最大（~41,700 LOC），承载配置、Bootstrap、会话、权限、MCP 和任务六个子系统。`rusty-claude-cli` 是顶层入口，依赖 `runtime` 和 `commands`；`api` 独立程度最高，只负责 HTTP 通信。
+claw-code 是一个运行在终端中的 Agent 系统，按职责分为入口层、运行时层、通信层、工具层、扩展层五层。入口层处理 I/O，运行时层驱动 Agent 循环并调度所有子系统，通信层封装 LLM 交互，工具层定义内置能力，扩展层通过 MCP 连接外部工具。
 
-一次完整的用户交互从 CLI 入口出发，经过 Bootstrap 引导、配置加载、工具注册、MCP 发现、权限初始化、会话创建、系统提示词构建、Turn Loop 循环、LLM 调用、权限检查、工具执行、结果回填，最终输出结果并持久化会话。系统提示词构建（`prompt.rs`）是连接配置层与对话引擎的关键桥梁，决定了 LLM"知道自己能做什么"。
+一次用户请求从 CLI 入口进入，经过 Bootstrap 引导、配置加载、工具注册、权限初始化、会话创建、系统提示词构建，进入 Turn Loop 循环——LLM 调用、权限审查、工具执行、结果回填，直到 LLM 输出文本回复并持久化会话。
 
-各章模块对应关系表（2.3）和关键数据结构列是全书的核心索引——读任何一章前都可以回到这里确认位置和核心类型名。
-
-下一章将追踪一次完整的命令执行路径，展示数据如何从 CLI 入口流经各模块到达第一条 LLM 响应。
+下一章将深入 Bootstrap 阶段，展示程序从 `main` 函数入口到第一次 LLM 调用之间发生了什么。

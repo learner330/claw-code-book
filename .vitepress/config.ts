@@ -43,6 +43,13 @@ export default defineConfig({
         ],
       },
       {
+        text: '间章：演进脉络',
+        collapsed: false,
+        items: [
+          { text: '从泄漏到重构：新增模块总览', link: '/chapter-interlude/evolution' },
+        ],
+      },
+      {
         text: '第二阶段：社区扩展与深层子系统',
         collapsed: false,
         items: [
